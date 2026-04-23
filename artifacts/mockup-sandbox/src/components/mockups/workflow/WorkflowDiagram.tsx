@@ -255,7 +255,7 @@ export function WorkflowDiagram() {
         </g>
 
         {/* ══════════════ LEGEND ══════════════ */}
-        <g transform={`translate(64, ${Y_A0 + 3*GAP + 60})`}>
+        <g transform={`translate(64, ${Y_A0 + 4*GAP + NH + 40})`}>
           <rect x={0} y={0} width={320} height={140} rx={12} fill="#0f1420" stroke="#1e2535" strokeWidth={1} />
           <text x={16} y={22} fontSize={10} fill="#475569" fontWeight="700" letterSpacing="1.5" fontFamily="monospace">LEGEND</text>
           {[
@@ -273,7 +273,7 @@ export function WorkflowDiagram() {
         </g>
 
         {/* SLA Legend */}
-        <g transform={`translate(${CANVAS_W - 300}, ${Y_A0 + 3*GAP + 60})`}>
+        <g transform={`translate(${CANVAS_W - 300}, ${Y_A0 + 4*GAP + NH + 40})`}>
           <rect x={0} y={0} width={240} height={110} rx={12} fill="#0f1420" stroke="#1e2535" strokeWidth={1} />
           <text x={16} y={22} fontSize={10} fill="#475569" fontWeight="700" letterSpacing="1.5" fontFamily="monospace">SLA THRESHOLDS</text>
           {[
