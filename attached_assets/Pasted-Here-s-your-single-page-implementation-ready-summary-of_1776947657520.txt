@@ -1,0 +1,123 @@
+Here’s your **single-page, implementation-ready summary** of the scoring model. This is structured so you can directly translate it into code, dashboards, or product specs.
+
+---
+
+# **B2B Lead Scoring Model — Single Pager (Demo Conversion Focus)**
+
+## **Scoring Formula**
+
+```id="formula"
+Total Score (0–100) = Intent (40) + Fit (30) + Behavior (20) + Source (10)
+```
+
+---
+
+## **1. Intent Score (0–40) — Primary Driver**
+
+| Signal                            | Points |
+| --------------------------------- | ------ |
+| Contact Sales click               | +30    |
+| Demo page visit                   | +25    |
+| Pricing page visit                | +20    |
+| Demo form started (not submitted) | +15    |
+| High-intent keyword/search        | +10    |
+
+**Rule:** Cap at 40
+**Purpose:** Capture *immediate buying intent*
+
+---
+
+## **2. Fit Score (0–30) — ICP Alignment**
+
+| Attribute        | Condition                  | Points |
+| ---------------- | -------------------------- | ------ |
+| Company size     | 50–500 employees           | +10    |
+| Industry         | Target segment             | +10    |
+| Job role         | Decision maker (Director+) | +10    |
+| Geography        | Target market              | +5     |
+| Non-ICP mismatch | Any major mismatch         | -10    |
+
+**Rule:** Cap at 30
+**Purpose:** Ensure sales focus on *high-value accounts*
+
+---
+
+## **3. Behavioral Score (0–20) — Engagement Depth**
+
+| Behavior                  | Points |
+| ------------------------- | ------ |
+| ≥3 sessions (last 7 days) | +10    |
+| Time on site >5 min       | +5     |
+| Content download          | +5     |
+| Email open                | +3     |
+| Email click               | +5     |
+
+**Rule:** Cap at 20
+**Purpose:** Measure *engagement momentum*
+
+---
+
+## **4. Source Score (0–10) — Channel Quality**
+
+| Source                  | Points |
+| ----------------------- | ------ |
+| Direct / branded search | +10    |
+| Referral / partner      | +8     |
+| Events (qualified)      | +8     |
+| Organic search          | +7     |
+| Paid ads                | +5     |
+| Cold lists              | +2     |
+
+**Rule:** Cap at 10
+**Purpose:** Reflect *historical conversion reliability*
+
+---
+
+## **5. Time Decay (Recency Adjustment)**
+
+| Condition              | Adjustment   |
+| ---------------------- | ------------ |
+| No activity (3 days)   | -10          |
+| No activity (7 days)   | -20          |
+| No activity (14+ days) | Reset / cold |
+
+**Purpose:** Keep scoring *time-sensitive and actionable*
+
+---
+
+## **6. Decision Thresholds (Action Mapping)**
+
+| Score  | Segment      | Action                           |
+| ------ | ------------ | -------------------------------- |
+| 80–100 | 🔥 Hot (SQL) | Immediate sales outreach (<1 hr) |
+| 60–79  | Warm (MQL)   | SDR follow-up + nurture          |
+| 40–59  | Nurture      | Automated campaigns              |
+| <40    | Cold         | Low priority / drip              |
+
+---
+
+## **7. Implementation Notes (Critical)**
+
+* Enforce **caps per category** (avoid skew)
+* Use **event-driven updates** (not batch-only)
+* Store:
+
+  * Raw signals
+  * Component scores
+  * Final score
+* Recalculate on:
+
+  * New activity
+  * Time decay triggers
+
+---
+
+## **8. Evolution Path**
+
+* Phase 1 → Rule-based (this model)
+* Phase 2 → Weight optimization (based on conversion data)
+* Phase 3 → ML model (predict demo probability)
+
+---
+
+If you want, next I’ll give you the **Execution Roadmap (0 → MVP → Scale)**—that’s where this turns from a model into an actual working product on Replit.
