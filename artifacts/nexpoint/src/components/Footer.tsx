@@ -47,6 +47,9 @@ export function Footer() {
             <span className="flex items-center gap-2">
               <Phone className="h-4 w-4" /> +1 (800) NEX-POINT
             </span>
+            <a href="/leads" className="hover:text-primary transition-colors opacity-40 hover:opacity-100 text-xs tracking-wide">
+              Admin · Leads
+            </a>
           </div>
         </div>
       </div>
