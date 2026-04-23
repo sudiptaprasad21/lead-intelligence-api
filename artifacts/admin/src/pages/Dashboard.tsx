@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, Fragment, useRef, useCallback } from "react";
 import nexPointLogo from "@assets/ChatGPT_Image_Apr_23,_2026,_05_53_31_PM_1776947023096.png";
 import { clearAuth, getUsername, adminFetch, API } from "@/lib/auth";
 import { useListLeads } from "@workspace/api-client-react";
@@ -10,12 +10,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   LogOut, Users, Flame, Zap, TrendingUp, Snowflake,
   RefreshCw, Search, BarChart3, Building2, Sheet, ExternalLink,
   Phone, MessageSquare, Mail, UserCheck, MailOpen, Target, Clock,
   ChevronDown, ChevronRight, Play, Sparkles, Layers, CheckCircle2,
-  AlertCircle, Timer, Calendar
+  AlertCircle, Timer, Calendar, Download, BrainCircuit, FileText,
+  Filter
 } from "lucide-react";
 
 const SEGMENT_COLORS: Record<string, string> = {
@@ -72,6 +74,54 @@ function ctaLabel(formType: string | null | undefined, campaign: string | null |
   if (formType === "demo_request") return "Demo";
   if (formType === "event_registration") return "Event";
   return formType ?? "—";
+}
+
+type DatePreset = "today" | "7d" | "30d" | "90d" | "all";
+
+const DATE_PRESETS: { key: DatePreset; label: string }[] = [
+  { key: "today", label: "Today" },
+  { key: "7d",    label: "Last 7 Days" },
+  { key: "30d",   label: "Last 30 Days" },
+  { key: "90d",   label: "Last 90 Days" },
+  { key: "all",   label: "All Time" },
+];
+
+function presetToSince(preset: DatePreset): Date | null {
+  const now = new Date();
+  if (preset === "today")  { const d = new Date(now); d.setHours(0, 0, 0, 0); return d; }
+  if (preset === "7d")  return new Date(now.getTime() - 7  * 86400000);
+  if (preset === "30d") return new Date(now.getTime() - 30 * 86400000);
+  if (preset === "90d") return new Date(now.getTime() - 90 * 86400000);
+  return null;
+}
+
+function computeStatsFromLeads(rawLeads: any[]): Stats {
+  const total = rawLeads.length;
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
+  const recent_7d = rawLeads.filter(l => new Date(l.created_at) >= sevenDaysAgo).length;
+  const avg_total_score   = total > 0 ? Math.round(rawLeads.reduce((s, l) => s + (l.total_score ?? 0), 0) / total) : 0;
+  const avg_intent_score  = total > 0 ? Math.round(rawLeads.reduce((s, l) => s + (l.intent_score ?? 0), 0) / total) : 0;
+  const avg_fit_score     = total > 0 ? Math.round(rawLeads.reduce((s, l) => s + (l.fit_score ?? 0), 0) / total) : 0;
+  const segment_counts    = rawLeads.reduce<Record<string, number>>((acc, l) => { acc[l.segment] = (acc[l.segment] ?? 0) + 1; return acc; }, {});
+  const industry_counts   = rawLeads.reduce<Record<string, number>>((acc, l) => { const k = l.industry ?? "Unknown"; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {});
+  const source_counts     = rawLeads.reduce<Record<string, number>>((acc, l) => { const k = l.referral_source ?? l.lead_source ?? "Direct"; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {});
+  const form_type_counts  = rawLeads.reduce<Record<string, number>>((acc, l) => { const k = l.form_type ?? "Unknown"; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {});
+  const score_distribution = [
+    { range: "0–20",   count: rawLeads.filter(l => (l.total_score ?? 0) <= 20).length },
+    { range: "21–40",  count: rawLeads.filter(l => (l.total_score ?? 0) > 20 && (l.total_score ?? 0) <= 40).length },
+    { range: "41–60",  count: rawLeads.filter(l => (l.total_score ?? 0) > 40 && (l.total_score ?? 0) <= 60).length },
+    { range: "61–80",  count: rawLeads.filter(l => (l.total_score ?? 0) > 60 && (l.total_score ?? 0) <= 80).length },
+    { range: "81–100", count: rawLeads.filter(l => (l.total_score ?? 0) > 80).length },
+  ];
+  return { total, recent_7d, avg_total_score, avg_intent_score, avg_fit_score, segment_counts, industry_counts, source_counts, form_type_counts, score_distribution };
+}
+
+interface InsightData {
+  period: string;
+  periodLabel: string;
+  bullets: string[];
+  summary: { newLeads: number; hot: number; warm: number; avgScore: number; deliveredActions: number; failedActions: number };
+  generatedAt: string;
 }
 
 interface Stats {
@@ -153,6 +203,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const username = getUsername();
   const [search, setSearch] = useState("");
   const [segFilter, setSegFilter] = useState("all");
+  const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [stats, setStats] = useState<Stats | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const [sheetUrl, setSheetUrl] = useState<string | null>(null);
@@ -162,12 +213,21 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [leadActions, setLeadActions] = useState<any[]>([]);
   const [actionsLoading, setActionsLoading] = useState(false);
   const [triggering, setTriggering] = useState(false);
+  const [pdfingDashboard, setPdfingDashboard] = useState(false);
 
   // Workflow health state
   const [wfHealth, setWfHealth] = useState<WorkflowHealth | null>(null);
   const [wfLoading, setWfLoading] = useState(true);
   const [wfSyncing, setWfSyncing] = useState(false);
   const [wfSyncMsg, setWfSyncMsg] = useState("");
+
+  // Lead insights state
+  const [insights, setInsights] = useState<Record<string, InsightData>>({});
+  const [insightsLoading, setInsightsLoading] = useState<Record<string, boolean>>({});
+  const [activeInsightPeriod, setActiveInsightPeriod] = useState<"daily" | "weekly" | "monthly">("weekly");
+  const [pdfingInsights, setPdfingInsights] = useState(false);
+  const insightsRef = useRef<HTMLDivElement>(null);
+  const dashboardRef = useRef<HTMLDivElement>(null);
 
   const { data: leads = [], isLoading, refetch, isFetching } = useListLeads();
 
@@ -214,7 +274,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   useEffect(() => {
     loadStats();
     loadWorkflowHealth();
-    // Check if a sheet already exists for this session
+    loadInsights("weekly");
     adminFetch("/admin/sheets/info")
       .then(r => r.json())
       .then((d: any) => { if (d.exists) setSheetUrl(d.url); })
@@ -278,12 +338,70 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     }
   }
 
+  async function loadInsights(period: string) {
+    if (insights[period] || insightsLoading[period]) return;
+    setInsightsLoading(prev => ({ ...prev, [period]: true }));
+    try {
+      const res = await adminFetch(`/admin/insights?period=${period}`);
+      if (res.ok) {
+        const data = await res.json() as InsightData;
+        setInsights(prev => ({ ...prev, [period]: data }));
+      }
+    } finally {
+      setInsightsLoading(prev => ({ ...prev, [period]: false }));
+    }
+  }
+
+  async function refreshInsights(period: string) {
+    setInsights(prev => { const next = { ...prev }; delete next[period]; return next; });
+    setInsightsLoading(prev => ({ ...prev, [period]: false }));
+    await loadInsights(period);
+  }
+
+  async function downloadInsightsPDF(period: string) {
+    if (!insightsRef.current) return;
+    setPdfingInsights(true);
+    try {
+      const { default: html2canvas } = await import("html2canvas");
+      const { jsPDF } = await import("jspdf");
+      const canvas = await html2canvas(insightsRef.current, { scale: 2, backgroundColor: "#0f1623", useCORS: true });
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({ orientation: "landscape", unit: "px", format: [canvas.width / 2, canvas.height / 2] });
+      pdf.addImage(imgData, "PNG", 0, 0, canvas.width / 2, canvas.height / 2);
+      pdf.save(`nexpoint-insights-${period}-${new Date().toISOString().slice(0, 10)}.pdf`);
+    } finally {
+      setPdfingInsights(false);
+    }
+  }
+
+  async function downloadDashboardPDF() {
+    if (!dashboardRef.current) return;
+    setPdfingDashboard(true);
+    try {
+      const { default: html2canvas } = await import("html2canvas");
+      const { jsPDF } = await import("jspdf");
+      const canvas = await html2canvas(dashboardRef.current, { scale: 1.5, backgroundColor: "#0f1623", useCORS: true, windowHeight: dashboardRef.current.scrollHeight });
+      const imgData = canvas.toDataURL("image/png");
+      const pdfW = 1190;
+      const pdfH = Math.round((canvas.height / canvas.width) * pdfW);
+      const pdf = new jsPDF({ orientation: pdfW > pdfH ? "landscape" : "portrait", unit: "px", format: [pdfW, pdfH] });
+      pdf.addImage(imgData, "PNG", 0, 0, pdfW, pdfH);
+      pdf.save(`nexpoint-dashboard-${new Date().toISOString().slice(0, 10)}.pdf`);
+    } finally {
+      setPdfingDashboard(false);
+    }
+  }
+
   function handleLogout() {
     clearAuth();
     onLogout();
   }
 
-  const filtered = leads.filter(l => {
+  const since = presetToSince(datePreset);
+
+  const dateFilteredLeads = since ? leads.filter(l => new Date(l.created_at) >= since) : leads;
+
+  const filtered = dateFilteredLeads.filter(l => {
     const matchSearch = search === "" ||
       l.full_name.toLowerCase().includes(search.toLowerCase()) ||
       l.email.toLowerCase().includes(search.toLowerCase()) ||
@@ -292,19 +410,23 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     return matchSearch && matchSeg;
   });
 
-  const segmentData = stats
-    ? Object.entries(stats.segment_counts).map(([name, value]) => ({ name, value }))
+  const displayStats: Stats | null = datePreset === "all"
+    ? stats
+    : leads.length > 0 ? computeStatsFromLeads(dateFilteredLeads) : null;
+
+  const segmentData = displayStats
+    ? Object.entries(displayStats.segment_counts).map(([name, value]) => ({ name, value }))
     : [];
 
-  const industryData = stats
-    ? Object.entries(stats.industry_counts)
+  const industryData = displayStats
+    ? Object.entries(displayStats.industry_counts)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 7)
         .map(([name, count]) => ({ name, count }))
     : [];
 
-  const sourceData = stats
-    ? Object.entries(stats.source_counts)
+  const sourceData = displayStats
+    ? Object.entries(displayStats.source_counts)
         .sort((a, b) => b[1] - a[1])
         .map(([name, count]) => ({ name, count }))
     : [];
@@ -346,6 +468,19 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                 <><Sheet className="w-3.5 h-3.5 mr-1.5" /> Sync to Sheets</>
               )}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={downloadDashboardPDF}
+              disabled={pdfingDashboard}
+              className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/10"
+            >
+              {pdfingDashboard ? (
+                <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Generating…</>
+              ) : (
+                <><Download className="w-3.5 h-3.5 mr-1.5" /> Download PDF</>
+              )}
+            </Button>
             <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={isFetching || statsLoading}>
               <RefreshCw className={`w-4 h-4 ${isFetching || statsLoading ? "animate-spin" : ""}`} />
             </Button>
@@ -361,22 +496,40 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         </div>
       </header>
 
-      <div className="max-w-[1400px] mx-auto px-6 py-8 space-y-8">
-        {/* Page title */}
-        <div>
-          <h1 className="text-2xl font-bold">Lead Intelligence</h1>
-          <p className="text-sm text-muted-foreground mt-1">Real-time view of all captured leads, scores, and pipeline health</p>
+      <div ref={dashboardRef} className="max-w-[1400px] mx-auto px-6 py-8 space-y-8">
+        {/* Page title + date filter */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold">Lead Intelligence</h1>
+            <p className="text-sm text-muted-foreground mt-1">Real-time view of all captured leads, scores, and pipeline health</p>
+          </div>
+          <div className="flex items-center gap-1.5 bg-card border border-border rounded-lg p-1">
+            <Filter className="w-3.5 h-3.5 text-muted-foreground ml-1.5 mr-0.5 shrink-0" />
+            {DATE_PRESETS.map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setDatePreset(key)}
+                className={`px-3 py-1.5 rounded text-xs font-medium transition-colors whitespace-nowrap ${
+                  datePreset === key
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           {[
-            { label: "Total Leads", value: stats?.total ?? "—", icon: Users, color: "text-primary", bg: "bg-primary/10" },
-            { label: "Hot (SQL)", value: stats?.segment_counts?.hot ?? 0, icon: Flame, color: "text-red-400", bg: "bg-red-500/10" },
-            { label: "Warm (MQL)", value: stats?.segment_counts?.warm ?? 0, icon: Zap, color: "text-orange-400", bg: "bg-orange-500/10" },
-            { label: "Nurture", value: stats?.segment_counts?.nurture ?? 0, icon: TrendingUp, color: "text-blue-400", bg: "bg-blue-500/10" },
-            { label: "Cold", value: stats?.segment_counts?.cold ?? 0, icon: Snowflake, color: "text-gray-400", bg: "bg-gray-500/10" },
-            { label: "Avg Score", value: stats ? `${stats.avg_total_score}/100` : "—", icon: BarChart3, color: "text-green-400", bg: "bg-green-500/10" },
+            { label: "Total Leads", value: displayStats?.total ?? "—", icon: Users, color: "text-primary", bg: "bg-primary/10" },
+            { label: "Hot (SQL)", value: displayStats?.segment_counts?.hot ?? 0, icon: Flame, color: "text-red-400", bg: "bg-red-500/10" },
+            { label: "Warm (MQL)", value: displayStats?.segment_counts?.warm ?? 0, icon: Zap, color: "text-orange-400", bg: "bg-orange-500/10" },
+            { label: "Nurture", value: displayStats?.segment_counts?.nurture ?? 0, icon: TrendingUp, color: "text-blue-400", bg: "bg-blue-500/10" },
+            { label: "Cold", value: displayStats?.segment_counts?.cold ?? 0, icon: Snowflake, color: "text-gray-400", bg: "bg-gray-500/10" },
+            { label: "Avg Score", value: displayStats ? `${displayStats.avg_total_score}/100` : "—", icon: BarChart3, color: "text-green-400", bg: "bg-green-500/10" },
           ].map(({ label, value, icon: Icon, color, bg }) => (
             <Card key={label} className="border-card-border">
               <CardContent className="pt-5 pb-4 px-4">
@@ -391,22 +544,22 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         </div>
 
         {/* Secondary metrics */}
-        {stats && (
+        {displayStats && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card className="border-card-border">
               <CardContent className="pt-5 pb-4 px-4">
                 <p className="text-xs text-muted-foreground">New Leads (7 days)</p>
-                <p className="text-3xl font-bold mt-1">{stats.recent_7d}</p>
+                <p className="text-3xl font-bold mt-1">{displayStats.recent_7d}</p>
                 <p className="text-xs text-muted-foreground mt-1">leads this week</p>
               </CardContent>
             </Card>
             <Card className="border-card-border">
               <CardContent className="pt-5 pb-4 px-4">
                 <p className="text-xs text-muted-foreground">Avg Intent Score</p>
-                <p className="text-3xl font-bold mt-1">{stats.avg_intent_score}<span className="text-lg text-muted-foreground">/40</span></p>
+                <p className="text-3xl font-bold mt-1">{displayStats.avg_intent_score}<span className="text-lg text-muted-foreground">/40</span></p>
                 <div className="mt-2">
                   <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                    <div className="h-full bg-primary rounded-full" style={{ width: `${(stats.avg_intent_score / 40) * 100}%` }} />
+                    <div className="h-full bg-primary rounded-full" style={{ width: `${(displayStats.avg_intent_score / 40) * 100}%` }} />
                   </div>
                 </div>
               </CardContent>
@@ -414,10 +567,10 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
             <Card className="border-card-border">
               <CardContent className="pt-5 pb-4 px-4">
                 <p className="text-xs text-muted-foreground">Avg Fit Score</p>
-                <p className="text-3xl font-bold mt-1">{stats.avg_fit_score}<span className="text-lg text-muted-foreground">/30</span></p>
+                <p className="text-3xl font-bold mt-1">{displayStats.avg_fit_score}<span className="text-lg text-muted-foreground">/30</span></p>
                 <div className="mt-2">
                   <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                    <div className="h-full bg-cyan-400 rounded-full" style={{ width: `${(stats.avg_fit_score / 30) * 100}%` }} />
+                    <div className="h-full bg-cyan-400 rounded-full" style={{ width: `${(displayStats.avg_fit_score / 30) * 100}%` }} />
                   </div>
                 </div>
               </CardContent>
@@ -426,7 +579,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         )}
 
         {/* Charts row */}
-        {stats && (
+        {displayStats && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Segment pie */}
             <Card className="border-card-border">
@@ -472,7 +625,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={stats.score_distribution} barSize={28}>
+                  <BarChart data={displayStats!.score_distribution} barSize={28}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(217 33% 22%)" />
                     <XAxis dataKey="range" tick={{ fontSize: 10, fill: "hsl(215 20% 60%)" }} />
                     <YAxis tick={{ fontSize: 10, fill: "hsl(215 20% 60%)" }} allowDecimals={false} />
@@ -509,7 +662,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         )}
 
         {/* Industry chart */}
-        {stats && industryData.length > 0 && (
+        {displayStats && industryData.length > 0 && (
           <Card className="border-card-border">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -1010,6 +1163,133 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               <span>Showing {filtered.length} lead{filtered.length !== 1 ? "s" : ""}</span>
               <span>Last refreshed: {new Date().toLocaleTimeString()}</span>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* ── Lead Insights ─────────────────────────────────────── */}
+        <Card className="border-card-border">
+          <CardHeader className="pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <BrainCircuit className="w-4 h-4 text-violet-400" />
+                  Lead Insights
+                </CardTitle>
+                <CardDescription className="text-xs mt-1">
+                  AI-generated executive intelligence — actionable, period-specific, and board-ready
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Tabs
+              defaultValue="weekly"
+              onValueChange={(period) => { setActiveInsightPeriod(period as any); loadInsights(period); }}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <TabsList className="bg-muted/50 border border-border/50">
+                  <TabsTrigger value="daily"   className="text-xs px-4">Daily</TabsTrigger>
+                  <TabsTrigger value="weekly"  className="text-xs px-4">Weekly</TabsTrigger>
+                  <TabsTrigger value="monthly" className="text-xs px-4">Monthly</TabsTrigger>
+                </TabsList>
+              </div>
+
+              {(["daily", "weekly", "monthly"] as const).map(period => (
+                <TabsContent key={period} value={period}>
+                  {/* Insights card — ref tracks active tab for PDF download */}
+                  <div ref={period === activeInsightPeriod ? insightsRef : undefined} className="space-y-4">
+                    {insightsLoading[period] ? (
+                      <div className="flex items-center gap-3 py-10 justify-center text-muted-foreground">
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span className="text-sm">Generating AI insights…</span>
+                      </div>
+                    ) : insights[period] ? (
+                      <>
+                        {/* Summary bar */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-2">
+                          {[
+                            { label: "New Leads", value: insights[period].summary.newLeads, color: "text-primary" },
+                            { label: "Hot (SQL)", value: insights[period].summary.hot, color: "text-red-400" },
+                            { label: "Warm (MQL)", value: insights[period].summary.warm, color: "text-orange-400" },
+                            { label: "Avg Score", value: `${insights[period].summary.avgScore}/100`, color: "text-green-400" },
+                            { label: "Delivered", value: insights[period].summary.deliveredActions, color: "text-emerald-400" },
+                            { label: "Failed", value: insights[period].summary.failedActions, color: insights[period].summary.failedActions > 0 ? "text-red-400" : "text-muted-foreground" },
+                          ].map(({ label, value, color }) => (
+                            <div key={label} className="bg-muted/30 rounded-lg px-3 py-2.5 border border-border/50">
+                              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
+                              <p className={`text-base font-bold mt-0.5 ${color}`}>{value}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* AI bullets */}
+                        <div className="bg-gradient-to-br from-violet-500/5 to-blue-500/5 border border-violet-500/20 rounded-xl p-5 space-y-3">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                            <span className="text-xs font-semibold text-violet-300 uppercase tracking-wider">AI Analysis — {insights[period].periodLabel}</span>
+                          </div>
+                          <ul className="space-y-3">
+                            {insights[period].bullets.map((bullet, i) => (
+                              <li key={i} className="flex gap-3 text-sm text-foreground leading-relaxed">
+                                <span className="mt-0.5 w-5 h-5 rounded-full bg-violet-500/20 border border-violet-500/30 flex items-center justify-center text-[10px] font-bold text-violet-400 shrink-0">
+                                  {i + 1}
+                                </span>
+                                <span>{bullet}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        {/* Footer: generated at + actions */}
+                        <div className="flex items-center justify-between pt-1">
+                          <p className="text-[10px] text-muted-foreground">
+                            Generated {new Date(insights[period].generatedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => refreshInsights(period)}
+                              className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                            >
+                              <RefreshCw className="w-3 h-3 mr-1.5" /> Refresh
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => downloadInsightsPDF(period)}
+                              disabled={pdfingInsights}
+                              className="h-7 text-xs border-violet-500/30 text-violet-400 hover:bg-violet-500/10"
+                            >
+                              {pdfingInsights
+                                ? <><RefreshCw className="w-3 h-3 mr-1.5 animate-spin" /> Generating…</>
+                                : <><FileText className="w-3 h-3 mr-1.5" /> Download PDF</>}
+                            </Button>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                        <div className="w-12 h-12 rounded-full bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
+                          <BrainCircuit className="w-6 h-6 text-violet-400" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">No insights loaded yet</p>
+                          <p className="text-xs text-muted-foreground mt-1">Click below to generate AI-powered intelligence for the {period} period</p>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => loadInsights(period)}
+                          className="bg-violet-600 hover:bg-violet-700 text-white text-xs mt-1"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Generate {period.charAt(0).toUpperCase() + period.slice(1)} Insights
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+              ))}
+            </Tabs>
           </CardContent>
         </Card>
 

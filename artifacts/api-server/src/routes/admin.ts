@@ -1,9 +1,9 @@
 import { Router } from "express";
 import crypto from "crypto";
 import { db, leadsTable, leadActionsTable } from "@workspace/db";
-// @replit/connectors-sdk — Google Sheets + Gmail integration
 import { ReplitConnectors } from "@replit/connectors-sdk";
-import { eq } from "drizzle-orm";
+import { eq, gte, and } from "drizzle-orm";
+import { openai } from "@workspace/integrations-openai-ai-server";
 
 // ─── Workflow SLA Definitions ─────────────────────────────────────────────
 // null = no SLA (scheduled future drip / cold). Measured in minutes from createdAt.
@@ -537,6 +537,102 @@ router.post("/admin/sheets/workflow-health-sync", authMiddleware, async (_req, r
   } catch (err: any) {
     res.status(500).json({ error: err?.message ?? "Workflow health sync failed" });
   }
+});
+
+// ─── Lead Insights (AI-generated, period-scoped) ──────────────────────────
+router.get("/admin/insights", authMiddleware, async (req, res) => {
+  const period = (req.query.period as string) || "weekly";
+  const now = new Date();
+
+  const msPerPeriod: Record<string, number> = {
+    daily:   1 * 24 * 60 * 60 * 1000,
+    weekly:  7 * 24 * 60 * 60 * 1000,
+    monthly: 30 * 24 * 60 * 60 * 1000,
+  };
+  const windowMs = msPerPeriod[period] ?? msPerPeriod.weekly;
+  const since = new Date(now.getTime() - windowMs);
+
+  const allLeads = await db.select().from(leadsTable);
+  const periodLeads = allLeads.filter(l => new Date(l.createdAt) >= since);
+  const allActions = await db.select().from(leadActionsTable);
+  const periodActions = allActions.filter(a => new Date(a.createdAt) >= since);
+
+  const seg = (leads: typeof allLeads) =>
+    leads.reduce<Record<string, number>>((acc, l) => { acc[l.segment] = (acc[l.segment] ?? 0) + 1; return acc; }, {});
+
+  const deliveredActions = periodActions.filter(a => a.status === "delivered" || a.status === "success").length;
+  const failedActions    = periodActions.filter(a => a.status === "failed").length;
+  const hotLeads         = periodLeads.filter(l => l.segment === "hot");
+  const warmLeads        = periodLeads.filter(l => l.segment === "warm");
+  const avgScore         = periodLeads.length > 0
+    ? Math.round(periodLeads.reduce((s, l) => s + (l.totalScore ?? 0), 0) / periodLeads.length)
+    : 0;
+
+  const topIndustries = Object.entries(
+    periodLeads.reduce<Record<string, number>>((acc, l) => { const k = l.industry ?? "Unknown"; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {})
+  ).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name, count]) => `${name} (${count})`).join(", ");
+
+  const periodLabel = period === "daily" ? "last 24 hours" : period === "weekly" ? "last 7 days" : "last 30 days";
+
+  const prompt = `You are an executive business intelligence analyst for Nexpoint, an AI-powered B2B digital marketing platform. 
+Generate concise, EXECUTIVE-READY lead intelligence insights for the ${periodLabel}.
+
+Pipeline data for the ${periodLabel}:
+- New leads captured: ${periodLeads.length}
+- Hot (SQL) leads: ${hotLeads.length}
+- Warm (MQL) leads: ${warmLeads.length}
+- Nurture leads: ${periodLeads.filter(l => l.segment === "nurture").length}
+- Cold leads: ${periodLeads.filter(l => l.segment === "cold").length}
+- Average lead score: ${avgScore}/100
+- Top industries: ${topIndustries || "N/A"}
+- Outreach actions delivered: ${deliveredActions}
+- Outreach actions failed: ${failedActions}
+- Total pipeline (all time): ${allLeads.length} leads | Segment breakdown: ${JSON.stringify(seg(allLeads))}
+
+Generate exactly 5 bullet points. Each bullet must be:
+1. Actionable — tell the reader what to DO
+2. Specific — reference actual numbers from the data
+3. Executive-ready — no jargon, crisp and direct
+4. Oriented toward revenue impact or pipeline efficiency
+
+Format: Return ONLY a JSON array of 5 strings (the bullet texts). No markdown, no explanation, just the JSON array.
+Example: ["Bullet 1 text.", "Bullet 2 text.", ...]`;
+
+  let bullets: string[] = [];
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-5.1",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+      max_tokens: 800,
+    });
+    const raw = completion.choices[0]?.message?.content?.trim() ?? "[]";
+    const parsed = JSON.parse(raw.replace(/^```json\n?/, "").replace(/\n?```$/, ""));
+    if (Array.isArray(parsed)) bullets = parsed.slice(0, 5);
+  } catch {
+    bullets = [
+      `${periodLeads.length} new lead${periodLeads.length !== 1 ? "s" : ""} were captured in the ${periodLabel}.`,
+      `${hotLeads.length} hot SQL lead${hotLeads.length !== 1 ? "s" : ""} require immediate sales follow-up — prioritise outreach within the hour.`,
+      `${warmLeads.length} warm MQL lead${warmLeads.length !== 1 ? "s" : ""} are in the pipeline — schedule personalised email sequences within 24 hours.`,
+      `Average lead score of ${avgScore}/100 indicates ${avgScore >= 60 ? "strong intent — focus on conversion" : avgScore >= 40 ? "moderate intent — nurture to upgrade score" : "early-stage intent — educate before selling"}.`,
+      `${deliveredActions} outreach actions delivered with ${failedActions} failure${failedActions !== 1 ? "s" : ""} — review failed actions to prevent pipeline leakage.`,
+    ];
+  }
+
+  res.json({
+    period,
+    periodLabel,
+    bullets,
+    summary: {
+      newLeads: periodLeads.length,
+      hot: hotLeads.length,
+      warm: warmLeads.length,
+      avgScore,
+      deliveredActions,
+      failedActions,
+    },
+    generatedAt: now.toISOString(),
+  });
 });
 
 export default router;
