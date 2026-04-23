@@ -10,12 +10,18 @@ import { db, leadActionsTable, leadsTable, leadActivitiesTable } from "@workspac
 import { eq, and } from "drizzle-orm";
 import type { Lead } from "@workspace/db";
 import {
-  generateWhatsAppMessage,
+  generateTelegramMessage,
   generateWarmEmail,
   generateNurtureEmail,
   generateSDRTalkingPoints,
 } from "./ai-outreach";
 import { getSegment } from "./lead-scoring";
+import { sendGmail } from "./gmail-sender";
+import {
+  sendTelegram,
+  formatHotLeadNotification,
+  formatSDRNotification,
+} from "./telegram-sender";
 
 // ─── Working Hours (Mon–Sat, 09:00–20:00 local) ─────────────────────────────
 
@@ -99,6 +105,21 @@ async function logAction(params: {
     .onConflictDoNothing(); // Idempotency guard — silently skip duplicate inserts
 }
 
+async function updateActionStatus(
+  idempotencyKey: string,
+  status: "delivered" | "failed",
+  extra?: Record<string, unknown>
+) {
+  await db
+    .update(leadActionsTable)
+    .set({
+      status,
+      executedAt: status === "delivered" ? new Date() : undefined,
+      ...(extra ? { metadata: extra } : {}),
+    })
+    .where(eq(leadActionsTable.idempotencyKey, idempotencyKey));
+}
+
 // ─── Segment Action Handlers ──────────────────────────────────────────────
 
 async function triggerHotActions(lead: Lead): Promise<string[]> {
@@ -139,19 +160,19 @@ async function triggerHotActions(lead: Lead): Promise<string[]> {
     triggered.push("immediate_sales_call");
   }
 
-  // 2. WhatsApp Outreach
-  const waKey = makeIdempotencyKey(lead.id, "whatsapp_outreach", segment);
-  if (!(await actionAlreadyTriggered(waKey))) {
-    const msg = await generateWhatsAppMessage(lead);
+  // 2. Telegram Outreach (notify SDR group with AI-personalized message)
+  const tgKey = makeIdempotencyKey(lead.id, "telegram_outreach", segment);
+  if (!(await actionAlreadyTriggered(tgKey))) {
+    const msg = await generateTelegramMessage(lead);
     await logAction({
       leadId: lead.id,
-      actionType: "whatsapp_outreach",
+      actionType: "telegram_outreach",
       segment,
-      status: "success",
+      status: "pending",
       scheduledAt: null,
-      executedAt: now,
+      executedAt: null,
       messageContent: msg.content,
-      idempotencyKey: waKey,
+      idempotencyKey: tgKey,
       metadata: {
         messageSource: msg.source,
         leadName: lead.fullName,
@@ -159,7 +180,25 @@ async function triggerHotActions(lead: Lead): Promise<string[]> {
         role: lead.jobTitle,
       },
     });
-    triggered.push("whatsapp_outreach");
+
+    // Fire Telegram notification to SDR group
+    const notification = formatHotLeadNotification({
+      leadName: lead.fullName ?? "Unknown",
+      company: lead.companyName ?? "",
+      role: lead.jobTitle ?? "",
+      score: lead.totalScore ?? 0,
+      aiMessage: msg.content,
+    });
+    const tgResult = await sendTelegram({ text: notification });
+    await updateActionStatus(
+      tgKey,
+      tgResult.success ? "delivered" : "failed",
+      tgResult.success
+        ? { deliveredAt: new Date().toISOString(), telegramMessageId: tgResult.messageId }
+        : { error: tgResult.error }
+    );
+
+    triggered.push("telegram_outreach");
   }
 
   return triggered;
@@ -170,7 +209,7 @@ async function triggerWarmActions(lead: Lead): Promise<string[]> {
   const segment = "warm";
   const now = new Date();
 
-  // 1. Email Outreach (trigger immediately, within 5-15 min simulated)
+  // 1. Email Outreach — deliver via Gmail
   const emailKey = makeIdempotencyKey(lead.id, "email_outreach", segment);
   if (!(await actionAlreadyTriggered(emailKey))) {
     const email = await generateWarmEmail(lead);
@@ -178,9 +217,9 @@ async function triggerWarmActions(lead: Lead): Promise<string[]> {
       leadId: lead.id,
       actionType: "email_outreach",
       segment,
-      status: "success",
+      status: "pending",
       scheduledAt: null,
-      executedAt: now,
+      executedAt: null,
       messageContent: `Subject: ${email.subject}\n\n${email.body}`,
       idempotencyKey: emailKey,
       metadata: {
@@ -191,6 +230,22 @@ async function triggerWarmActions(lead: Lead): Promise<string[]> {
         company: lead.companyName,
       },
     });
+
+    if (lead.email) {
+      const gmailResult = await sendGmail({
+        to: lead.email,
+        subject: email.subject,
+        body: email.body,
+      });
+      await updateActionStatus(
+        emailKey,
+        gmailResult.success ? "delivered" : "failed",
+        gmailResult.success
+          ? { deliveredAt: new Date().toISOString(), gmailMessageId: gmailResult.messageId }
+          : { error: gmailResult.error }
+      );
+    }
+
     triggered.push("email_outreach");
   }
 
@@ -223,6 +278,17 @@ async function triggerWarmActions(lead: Lead): Promise<string[]> {
         withinWorkingHours: inHours,
       },
     });
+
+    // Notify assigned SDR via Telegram
+    const sdrNotification = formatSDRNotification({
+      leadName: lead.fullName ?? "Unknown",
+      company: lead.companyName ?? "",
+      role: lead.jobTitle ?? "",
+      assignedTo: assignee,
+      talkingPoints,
+    });
+    await sendTelegram({ text: sdrNotification });
+
     triggered.push("sdr_followup");
   }
 
@@ -247,12 +313,29 @@ async function triggerNurtureActions(lead: Lead): Promise<string[]> {
           leadId: lead.id,
           actionType,
           segment,
-          status: "success",
-          executedAt: now,
+          status: "pending",
+          executedAt: null,
           messageContent: `Subject: ${email.subject}\n\n${email.body}`,
           idempotencyKey: key,
-          metadata: { subject: email.subject, emailSource: email.source, step },
+          metadata: { subject: email.subject, emailSource: email.source, step, sentTo: lead.email },
         });
+
+        // Deliver via Gmail
+        if (lead.email) {
+          const gmailResult = await sendGmail({
+            to: lead.email,
+            subject: email.subject,
+            body: email.body,
+          });
+          await updateActionStatus(
+            key,
+            gmailResult.success ? "delivered" : "failed",
+            gmailResult.success
+              ? { subject: email.subject, emailSource: email.source, step, sentTo: lead.email, deliveredAt: new Date().toISOString(), gmailMessageId: gmailResult.messageId }
+              : { subject: email.subject, emailSource: email.source, step, sentTo: lead.email, error: gmailResult.error }
+          );
+        }
+
         triggered.push(actionType);
       } else {
         const dayOffset = step === "day3" ? 3 : step === "day7" ? 7 : 14;

@@ -7,7 +7,7 @@
 import { openai } from "@workspace/integrations-openai-ai-server";
 import type { Lead } from "@workspace/db";
 
-export interface WhatsAppMessage {
+export interface TelegramMessage {
   content: string;
   source: "ai" | "template";
 }
@@ -39,15 +39,15 @@ function getFirstName(lead: Partial<Lead>): string {
   return lead.fullName?.split(" ")[0] ?? "there";
 }
 
-/** Generate a 2-4 line WhatsApp message for a Hot lead (immediate, action-driven) */
-export async function generateWhatsAppMessage(lead: Partial<Lead>): Promise<WhatsAppMessage> {
+/** Generate a 2-4 line Telegram message for a Hot lead (immediate, action-driven) */
+export async function generateTelegramMessage(lead: Partial<Lead>): Promise<TelegramMessage> {
   try {
     const firstName = getFirstName(lead);
     const context = buildLeadContext(lead);
 
     const prompt = `You are a B2B sales outreach specialist for Nexpoint — an AI-powered unified digital marketing platform that helps companies consolidate their marketing channels, automate campaigns, and track ROI in real-time.
 
-Write a WhatsApp outreach message to a HOT lead (high buying intent). 
+Write a short Telegram outreach message to a HOT lead (high buying intent).
 
 Lead context: ${context}
 
@@ -79,8 +79,7 @@ Output ONLY the message text, no labels or explanations.`;
 
     return { content, source: "ai" };
   } catch (err) {
-    // Log the error but don't surface it — fall back to template
-    console.warn("[AI Outreach] WhatsApp generation failed, using template:", (err as Error).message ?? err);
+    console.warn("[AI Outreach] Telegram generation failed, using template:", (err as Error).message ?? err);
     const firstName = getFirstName(lead);
     const role = lead.jobTitle ?? "your team";
     const company = lead.companyName ?? "your company";

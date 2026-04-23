@@ -88,7 +88,8 @@ interface Stats {
 
 const ACTION_META: Record<string, { icon: any; label: string; color: string }> = {
   immediate_sales_call:  { icon: Phone,          label: "Sales Call",          color: "text-red-400" },
-  whatsapp_outreach:     { icon: MessageSquare,   label: "WhatsApp",            color: "text-green-400" },
+  telegram_outreach:     { icon: MessageSquare,   label: "Telegram",            color: "text-blue-400" },
+  whatsapp_outreach:     { icon: MessageSquare,   label: "WhatsApp (legacy)",   color: "text-green-400" },
   email_outreach:        { icon: Mail,            label: "Email Outreach",      color: "text-blue-400" },
   sdr_followup:          { icon: UserCheck,       label: "SDR Follow-Up",       color: "text-orange-400" },
   drip_email_day0:       { icon: MailOpen,        label: "Drip Day 0",          color: "text-violet-400" },
@@ -731,7 +732,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               {[
                 {
                   label: "Intent (0–40)", color: "text-primary", items: [
-                    "WhatsApp / Contact click → 30 pts",
+                    "Telegram / Contact click → 30 pts",
                     "Trial / Event form → 25 pts",
                     "Demo form submitted → 20 pts",
                     "Pricing page visit → 20 pts",
