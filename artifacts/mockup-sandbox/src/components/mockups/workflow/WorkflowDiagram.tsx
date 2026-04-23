@@ -231,19 +231,32 @@ export function WorkflowDiagram() {
         <Arrow x1={COL.cold} y1={Y_A0+2*GAP+NH} x2={COL.cold} y2={Y_A0+3*GAP}  color="#6b7280" />
         <Node cx={COL.cold} y={Y_A0 + 3*GAP}  theme="cold" title="Suppression Check"    subtitle="No outreach if unsubscribed or idle for 90+ days"        />
 
-        {/* ══════════════ CROSS-CUTTING: RE-SCORE LOOP ══════════════ */}
-        <text x={80} y={Y_A0 + 3*GAP + 30} fontSize={10} fill="#334155" fontFamily="monospace">RE-SCORE ENGINE</text>
-        <rect x={70} y={Y_A0 + 3*GAP - 10} width={146} height={14} rx={7} fill="#1e2535" stroke="#334155" strokeWidth={1} />
-        <text x={143} y={Y_A0 + 3*GAP} fontSize={9} fill="#475569" textAnchor="middle" fontFamily="monospace">Score decay · 10% / 7d</text>
-
-        {/* Loop-back arrow from engagement back to classifier */}
+        {/* ══════════════ RE-SCORE LOOP ══════════════ */}
+        {/* Dashed feedback path: Engagement Tracking rows → right rail → up → back into Classifier */}
         <path
           d={`M ${COL.hot + NW/2 + 8} ${Y_A0 + 2*GAP + NH/2} L ${COL.cold + NW/2 + 60} ${Y_A0 + 2*GAP + NH/2} L ${COL.cold + NW/2 + 60} ${Y_CLAS + NH/2} L ${MID_X + 210} ${Y_CLAS + NH/2}`}
-          stroke="#334155" strokeWidth={1.2} fill="none" strokeDasharray="6 4"
+          stroke="#475569" strokeWidth={1.5} fill="none" strokeDasharray="7 4"
           markerEnd="url(#arr-334155)"
         />
-        <rect x={COL.cold + NW/2 + 16} y={Y_CLAS + NH/2 - 28} width={90} height={20} rx={10} fill="#1e2535" />
-        <text x={COL.cold + NW/2 + 61} y={Y_CLAS + NH/2 - 14} textAnchor="middle" fontSize={9} fill="#64748b" fontFamily="monospace">re-score loop</text>
+
+        {/* Re-Score Engine annotation box — pinned to the right rail */}
+        <g transform={`translate(${COL.cold + NW/2 + 76}, ${Y_A0 + GAP + 16})`}>
+          <rect x={0} y={0} width={230} height={108} rx={10}
+            fill="#0f141e" stroke="#334155" strokeWidth={1.2}
+          />
+          <rect x={0} y={0} width={230} height={4} rx={2} fill="#475569" />
+          {/* header */}
+          <text x={12} y={22} fontSize={9} fill="#64748b" fontWeight="700" letterSpacing="1.5" fontFamily="monospace">RE-SCORE ENGINE</text>
+          <text x={12} y={42} fontSize={12} fill="#94a3b8" fontWeight="600" fontFamily="system-ui">🔄  Feedback Loop</text>
+          {/* rules */}
+          <text x={12} y={62} fontSize={9.5} fill="#475569" fontFamily="system-ui">· Engagement (open/click/reply)</text>
+          <text x={12} y={77} fontSize={9.5} fill="#475569" fontFamily="system-ui">  triggers immediate re-score</text>
+          <text x={12} y={94} fontSize={9.5} fill="#f59e0b" fontFamily="monospace">  Score decays 10% per 7d idle</text>
+        </g>
+
+        {/* Small label on the horizontal segment of the arrow at classifier level */}
+        <rect x={MID_X + 148} y={Y_CLAS + NH/2 - 12} width={68} height={16} rx={8} fill="#1e2535" />
+        <text x={MID_X + 182} y={Y_CLAS + NH/2} textAnchor="middle" fontSize={9} fill="#64748b" fontFamily="monospace">re-score</text>
 
         {/* ══════════════ WORKING HOURS GATE ══════════════ */}
         <g>
