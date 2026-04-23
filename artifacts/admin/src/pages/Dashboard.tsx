@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { clearAuth, getUsername, adminFetch, API } from "@/lib/auth";
 import { useListLeads } from "@workspace/api-client-react";
 import {
@@ -11,7 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   LogOut, Users, Flame, Zap, TrendingUp, Snowflake,
-  RefreshCw, Search, BarChart3, Building2, Sheet, ExternalLink
+  RefreshCw, Search, BarChart3, Building2, Sheet, ExternalLink,
+  Phone, MessageSquare, Mail, UserCheck, MailOpen, Target, Clock,
+  ChevronDown, ChevronRight, Play, Sparkles, Layers, CheckCircle2,
+  AlertCircle, Timer, Calendar
 } from "lucide-react";
 
 const SEGMENT_COLORS: Record<string, string> = {
@@ -83,6 +86,37 @@ interface Stats {
   score_distribution: { range: string; count: number }[];
 }
 
+const ACTION_META: Record<string, { icon: any; label: string; color: string }> = {
+  immediate_sales_call:  { icon: Phone,          label: "Sales Call",          color: "text-red-400" },
+  whatsapp_outreach:     { icon: MessageSquare,   label: "WhatsApp",            color: "text-green-400" },
+  email_outreach:        { icon: Mail,            label: "Email Outreach",      color: "text-blue-400" },
+  sdr_followup:          { icon: UserCheck,       label: "SDR Follow-Up",       color: "text-orange-400" },
+  drip_email_day0:       { icon: MailOpen,        label: "Drip Day 0",          color: "text-violet-400" },
+  drip_email_day3:       { icon: MailOpen,        label: "Drip Day 3",          color: "text-violet-400" },
+  drip_email_day7:       { icon: MailOpen,        label: "Drip Day 7",          color: "text-violet-400" },
+  drip_email_day14:      { icon: MailOpen,        label: "Drip Day 14",         color: "text-violet-400" },
+  retargeting_trigger:   { icon: Target,          label: "Retargeting",         color: "text-cyan-400" },
+  cold_drip:             { icon: Clock,           label: "Cold Drip",           color: "text-gray-400" },
+  periodic_reeval:       { icon: RefreshCw,       label: "Re-Evaluation",       color: "text-gray-400" },
+};
+
+const STATUS_META: Record<string, { icon: any; label: string; cls: string }> = {
+  success:   { icon: CheckCircle2, label: "Success",   cls: "text-green-400 bg-green-500/10 border-green-500/25" },
+  pending:   { icon: Timer,        label: "Pending",    cls: "text-orange-400 bg-orange-500/10 border-orange-500/25" },
+  scheduled: { icon: Calendar,     label: "Scheduled",  cls: "text-blue-400 bg-blue-500/10 border-blue-500/25" },
+  failed:    { icon: AlertCircle,  label: "Failed",     cls: "text-red-400 bg-red-500/10 border-red-500/25" },
+};
+
+function ActionStatusBadge({ status }: { status: string }) {
+  const m = STATUS_META[status] ?? STATUS_META.pending;
+  const Icon = m.icon;
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${m.cls}`}>
+      <Icon className="w-2.5 h-2.5" /> {m.label}
+    </span>
+  );
+}
+
 export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const username = getUsername();
   const [search, setSearch] = useState("");
@@ -92,6 +126,10 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [sheetUrl, setSheetUrl] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
+  const [expandedLeadId, setExpandedLeadId] = useState<number | null>(null);
+  const [leadActions, setLeadActions] = useState<any[]>([]);
+  const [actionsLoading, setActionsLoading] = useState(false);
+  const [triggering, setTriggering] = useState(false);
 
   const { data: leads = [], isLoading, refetch, isFetching } = useListLeads();
 
@@ -137,6 +175,37 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   function handleRefresh() {
     refetch();
     loadStats();
+  }
+
+  async function loadLeadActions(leadId: number) {
+    setActionsLoading(true);
+    try {
+      const res = await adminFetch(`/leads/${leadId}/actions`);
+      if (res.ok) setLeadActions(await res.json());
+      else setLeadActions([]);
+    } finally {
+      setActionsLoading(false);
+    }
+  }
+
+  function toggleLeadExpand(leadId: number) {
+    if (expandedLeadId === leadId) {
+      setExpandedLeadId(null);
+      setLeadActions([]);
+    } else {
+      setExpandedLeadId(leadId);
+      loadLeadActions(leadId);
+    }
+  }
+
+  async function handleTriggerActions(leadId: number) {
+    setTriggering(true);
+    try {
+      const res = await adminFetch(`/leads/${leadId}/trigger-actions`, { method: "POST" });
+      if (res.ok) await loadLeadActions(leadId);
+    } finally {
+      setTriggering(false);
+    }
   }
 
   function handleLogout() {
@@ -443,7 +512,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-y border-border bg-muted/30">
-                    {["#", "Name", "Company", "Role", "Industry", "Size", "CTA", "Segment", "Score", "Intent", "Fit", "Behavior", "Source", "Captured"].map(h => (
+                    {["", "#", "Name", "Company", "Role", "Industry", "Size", "CTA", "Segment", "Score", "Intent", "Fit", "Behavior", "Source", "Captured"].map(h => (
                       <th key={h} className="px-4 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -451,52 +520,194 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                 <tbody>
                   {isLoading && (
                     <tr>
-                      <td colSpan={14} className="text-center py-12 text-muted-foreground">Loading leads…</td>
+                      <td colSpan={15} className="text-center py-12 text-muted-foreground">Loading leads…</td>
                     </tr>
                   )}
                   {!isLoading && filtered.length === 0 && (
                     <tr>
-                      <td colSpan={14} className="text-center py-12 text-muted-foreground">No leads found</td>
+                      <td colSpan={15} className="text-center py-12 text-muted-foreground">No leads found</td>
                     </tr>
                   )}
-                  {filtered.map((lead, i) => (
-                    <tr key={lead.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                      <td className="px-4 py-3 text-muted-foreground">{i + 1}</td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-foreground whitespace-nowrap">{lead.full_name}</div>
-                        <div className="text-muted-foreground text-[10px]">{lead.email}</div>
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap font-medium">{lead.company_name}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">{lead.job_title ?? <span className="italic opacity-50">—</span>}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">{lead.industry ?? <span className="italic text-muted-foreground/50">—</span>}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">{lead.company_size ?? "—"}</td>
-                      <td className="px-4 py-3">
-                        <span className="px-2 py-0.5 bg-primary/15 text-primary rounded text-[10px] font-medium whitespace-nowrap">
-                          {ctaLabel(lead.form_type, lead.campaign)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3"><SegmentBadge segment={lead.segment} /></td>
-                      <td className="px-4 py-3">
-                        <span className="font-bold text-sm text-foreground">{lead.total_score}</span>
-                        <span className="text-muted-foreground text-[10px]">/100</span>
-                      </td>
-                      <td className="px-4 py-3 min-w-[80px]">
-                        <ScoreBar value={lead.intent_score} max={40} color="#3b82f6" />
-                      </td>
-                      <td className="px-4 py-3 min-w-[80px]">
-                        <ScoreBar value={lead.fit_score} max={30} color="#06b6d4" />
-                      </td>
-                      <td className="px-4 py-3 min-w-[80px]">
-                        <ScoreBar value={lead.behavior_score} max={20} color="#22c55e" />
-                      </td>
-                      <td className="px-4 py-3 min-w-[80px]">
-                        <ScoreBar value={lead.source_score} max={10} color="#f59e0b" />
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
-                        {new Date(lead.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                      </td>
-                    </tr>
-                  ))}
+                  {filtered.map((lead, i) => {
+                    const isExpanded = expandedLeadId === lead.id;
+                    return (
+                      <Fragment key={lead.id}>
+                        <tr
+                          onClick={() => toggleLeadExpand(lead.id)}
+                          className={`border-b border-border/50 cursor-pointer transition-colors ${isExpanded ? "bg-muted/30" : "hover:bg-muted/20"}`}
+                        >
+                          <td className="pl-4 pr-1 py-3 text-muted-foreground">
+                            {isExpanded
+                              ? <ChevronDown className="w-3.5 h-3.5" />
+                              : <ChevronRight className="w-3.5 h-3.5" />}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">{i + 1}</td>
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-foreground whitespace-nowrap">{lead.full_name}</div>
+                            <div className="text-muted-foreground text-[10px]">{lead.email}</div>
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap font-medium">{lead.company_name}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">{lead.job_title ?? <span className="italic opacity-50">—</span>}</td>
+                          <td className="px-4 py-3 whitespace-nowrap">{lead.industry ?? <span className="italic text-muted-foreground/50">—</span>}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">{lead.company_size ?? "—"}</td>
+                          <td className="px-4 py-3">
+                            <span className="px-2 py-0.5 bg-primary/15 text-primary rounded text-[10px] font-medium whitespace-nowrap">
+                              {ctaLabel(lead.form_type, lead.campaign)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3"><SegmentBadge segment={lead.segment} /></td>
+                          <td className="px-4 py-3">
+                            <span className="font-bold text-sm text-foreground">{lead.total_score}</span>
+                            <span className="text-muted-foreground text-[10px]">/100</span>
+                          </td>
+                          <td className="px-4 py-3 min-w-[80px]">
+                            <ScoreBar value={lead.intent_score} max={40} color="#3b82f6" />
+                          </td>
+                          <td className="px-4 py-3 min-w-[80px]">
+                            <ScoreBar value={lead.fit_score} max={30} color="#06b6d4" />
+                          </td>
+                          <td className="px-4 py-3 min-w-[80px]">
+                            <ScoreBar value={lead.behavior_score} max={20} color="#22c55e" />
+                          </td>
+                          <td className="px-4 py-3 min-w-[80px]">
+                            <ScoreBar value={lead.source_score} max={10} color="#f59e0b" />
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
+                            {new Date(lead.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          </td>
+                        </tr>
+
+                        {/* Expanded Action Panel */}
+                        {isExpanded && (
+                          <tr key={`${lead.id}-actions`} className="bg-muted/10 border-b border-border/50">
+                            <td colSpan={15} className="px-6 py-4">
+                              <div className="space-y-3">
+                                {/* Panel header */}
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                                    <Layers className="w-3.5 h-3.5 text-primary" />
+                                    Action Log — {lead.full_name}
+                                    <SegmentBadge segment={lead.segment} />
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => { e.stopPropagation(); handleTriggerActions(lead.id); }}
+                                    disabled={triggering}
+                                    className="h-7 text-xs border-primary/30 text-primary hover:bg-primary/10"
+                                  >
+                                    {triggering
+                                      ? <><RefreshCw className="w-3 h-3 mr-1.5 animate-spin" /> Running…</>
+                                      : <><Play className="w-3 h-3 mr-1.5" /> Trigger Actions</>}
+                                  </Button>
+                                </div>
+
+                                {/* Action cards grid */}
+                                {actionsLoading ? (
+                                  <div className="text-xs text-muted-foreground py-4 text-center">Loading actions…</div>
+                                ) : leadActions.length === 0 ? (
+                                  <div className="text-xs text-muted-foreground py-4 text-center">
+                                    No actions triggered yet — click "Trigger Actions" to run the logic layer
+                                  </div>
+                                ) : (
+                                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                                    {leadActions.map((action: any) => {
+                                      const meta = ACTION_META[action.actionType] ?? { icon: Layers, label: action.actionType, color: "text-muted-foreground" };
+                                      const Icon = meta.icon;
+                                      const isAI = action.metadata?.messageSource === "ai" || action.metadata?.emailSource === "ai";
+                                      const msgLines = action.messageContent?.split("\n").filter(Boolean).slice(0, 4) ?? [];
+                                      return (
+                                        <div
+                                          key={action.id}
+                                          className="bg-card border border-border/60 rounded-lg p-3 space-y-2.5 text-xs"
+                                        >
+                                          {/* Action header */}
+                                          <div className="flex items-center justify-between gap-2">
+                                            <div className={`flex items-center gap-1.5 font-semibold ${meta.color}`}>
+                                              <Icon className="w-3.5 h-3.5" />
+                                              {meta.label}
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                              {isAI && (
+                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-violet-500/15 text-violet-400 border border-violet-500/25">
+                                                  <Sparkles className="w-2 h-2" /> AI
+                                                </span>
+                                              )}
+                                              <ActionStatusBadge status={action.status} />
+                                            </div>
+                                          </div>
+
+                                          {/* Scheduled time */}
+                                          {action.scheduledAt && (
+                                            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                                              <Calendar className="w-3 h-3" />
+                                              <span>
+                                                {action.status === "scheduled" ? "Scheduled: " : "At: "}
+                                                {new Date(action.scheduledAt).toLocaleString("en-US", {
+                                                  month: "short", day: "numeric",
+                                                  hour: "2-digit", minute: "2-digit"
+                                                })}
+                                              </span>
+                                            </div>
+                                          )}
+
+                                          {/* Assignment */}
+                                          {action.metadata?.assignedTo && (
+                                            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                                              <UserCheck className="w-3 h-3" />
+                                              <span>Assigned to: <strong className="text-foreground">{action.metadata.assignedTo}</strong></span>
+                                              {action.metadata.priority && (
+                                                <span className={`ml-1 px-1 py-0.5 rounded text-[9px] font-medium ${
+                                                  action.metadata.priority === "high"
+                                                    ? "bg-red-500/10 text-red-400"
+                                                    : "bg-orange-500/10 text-orange-400"
+                                                }`}>
+                                                  {action.metadata.priority}
+                                                </span>
+                                              )}
+                                              {action.metadata.sla && (
+                                                <span className="text-[9px] text-muted-foreground ml-1">SLA: {action.metadata.sla}</span>
+                                              )}
+                                            </div>
+                                          )}
+
+                                          {/* AI message preview */}
+                                          {msgLines.length > 0 && (
+                                            <div className="bg-muted/40 rounded p-2 space-y-1 text-[10px] text-muted-foreground font-mono leading-relaxed border border-border/40">
+                                              {msgLines.map((line: string, li: number) => (
+                                                <p key={li} className={line.startsWith("Subject:") ? "font-semibold text-foreground" : ""}>{line}</p>
+                                              ))}
+                                              {(action.messageContent?.split("\n").filter(Boolean).length ?? 0) > 4 && (
+                                                <p className="text-[9px] opacity-60">…and more</p>
+                                              )}
+                                            </div>
+                                          )}
+
+                                          {/* Retargeting channels */}
+                                          {action.metadata?.channels && (
+                                            <div className="flex gap-1">
+                                              {action.metadata.channels.map((ch: string) => (
+                                                <span key={ch} className="px-1.5 py-0.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/25 rounded text-[9px] font-medium capitalize">{ch}</span>
+                                              ))}
+                                            </div>
+                                          )}
+
+                                          {/* Triggered at */}
+                                          <div className="text-[9px] text-muted-foreground/50 pt-0.5 border-t border-border/30">
+                                            Triggered {new Date(action.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

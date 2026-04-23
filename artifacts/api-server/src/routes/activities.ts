@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, leadsTable, leadActivitiesTable } from "@workspace/db";
 import { TrackActivityBody } from "@workspace/api-zod";
 import { calculateLeadScore } from "../lib/lead-scoring";
+import { triggerActionsForLead } from "../lib/action-engine";
 
 const router: IRouter = Router();
 
@@ -79,6 +80,16 @@ router.post("/activities", async (req, res): Promise<void> => {
     },
     "Activity tracked and lead score updated"
   );
+
+  // Re-trigger action engine on new activity (handles segment upgrades, e.g. Warm → Hot)
+  triggerActionsForLead(lead.id).then((result) => {
+    req.log.info(
+      { leadId: lead.id, actionsTriggered: result.actions_triggered, newSegment: result.segment },
+      "Action engine re-triggered after activity"
+    );
+  }).catch((err) => {
+    req.log.warn({ leadId: lead.id, err: String(err) }, "Action engine error on activity — non-blocking");
+  });
 
   res.json({ activity, lead: updatedLead });
 });

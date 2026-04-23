@@ -1,0 +1,276 @@
+Design a logic layer for a B2B Lead Intelligence System that maps lead scores to segments and triggers corresponding actions.
+
+---
+
+## 1. Segmentation Logic (Score → Segment → Action)
+
+* If score >= 80:
+
+  * segment = "Hot"
+  * actions = ["Immediate Sales Call", "WhatsApp Outreach"]
+
+* If score >= 60 and < 80:
+
+  * segment = "Warm"
+  * actions = ["Email Outreach", "SDR Follow-up"]
+
+* If score >= 40 and < 60:
+
+  * segment = "Nurture"
+  * actions = ["Automated Email Workflow", "Retargeting Trigger"]
+
+* If score < 40:
+
+  * segment = "Cold"
+  * actions = ["Low Priority Drip Campaign", "Periodic Re-evaluation"]
+
+---
+
+## 2. Action Logic: Hot Leads (Path 1)
+
+### A. Immediate Sales Call Task Creation
+
+* Create task in CRM/task system in real-time
+* Priority: High
+
+#### Working Hours:
+
+* Monday–Saturday, 09:00 AM – 08:00 PM
+
+#### Rules:
+
+* Within working hours → Assign immediately
+* Outside working hours → Schedule next working day at 10:00 AM
+
+#### Assignment:
+
+* Round-robin OR geography-based routing
+
+#### Task Payload:
+
+* Lead details (name, company, role)
+* Score + key intent signals
+* Source + timestamp
+
+---
+
+### B. WhatsApp Outreach
+
+* Trigger immediately after qualification
+
+#### AI Inputs:
+
+* Role, company, intent signals, segment
+
+#### Constraints:
+
+* 2–4 lines
+* Personalized + action-driven
+
+#### Fallback:
+
+* Predefined template
+
+---
+
+## 3. Action Logic: Warm Leads
+
+### A. Email Outreach
+
+* Trigger within 5–15 minutes of lead qualification
+
+#### Type:
+
+* AI-personalized OR semi-templated
+
+#### Inputs:
+
+* Lead role, company, industry, intent signals
+
+#### Content Goal:
+
+* Introduce value proposition
+* Encourage demo booking
+
+#### Constraints:
+
+* Clear CTA (demo link)
+* Professional tone (B2B)
+
+#### Fallback:
+
+* Static email template if AI fails
+
+---
+
+### B. SDR Follow-Up Task
+
+* Create task for SDR team
+
+#### SLA:
+
+* Action within 24 hours
+
+#### Priority:
+
+* Medium
+
+#### Scheduling Rules:
+
+* If within working hours → assign immediately
+* If outside working hours → next working day at 11:00 AM
+
+#### Task Includes:
+
+* Lead summary
+* Email already sent (context)
+* Suggested talking points (optional AI-generated)
+
+---
+
+### C. Engagement Tracking
+
+* Track:
+
+  * Email opens
+  * Link clicks
+  * Demo bookings
+
+#### Trigger:
+
+* If engagement detected → re-score lead
+* If score crosses 80 → move to "Hot" flow
+
+---
+
+## 4. Action Logic: Nurture Leads
+
+### A. Automated Email Workflow
+
+* Add lead to multi-step drip campaign
+
+#### Structure:
+
+* Day 0 → Intro email
+* Day 3 → Value/educational content
+* Day 7 → Case study / proof
+* Day 14 → Soft CTA (demo invite)
+
+#### Personalization:
+
+* Light personalization (industry/use case)
+
+---
+
+### B. Retargeting Trigger
+
+* Add lead to retargeting audience (ads)
+
+#### Channels:
+
+* LinkedIn / Google (simulated if needed)
+
+#### Objective:
+
+* Reinforce awareness + drive return visits
+
+---
+
+### C. Engagement Monitoring
+
+* Track:
+
+  * Email interaction
+  * Website revisit
+  * Content engagement
+
+#### Logic:
+
+* If engagement increases:
+  → Recalculate score
+  → Upgrade to Warm or Hot
+
+---
+
+### D. Re-scoring Frequency
+
+* Automatically re-evaluate every 3–7 days
+* OR on any new activity event
+
+---
+
+## 5. Action Logic: Cold Leads
+
+### A. Low Priority Drip Campaign
+
+* Add to long-term, low-frequency campaign
+
+#### Frequency:
+
+* 1 email every 2–3 weeks
+
+#### Content:
+
+* Thought leadership
+* Industry insights
+* No aggressive CTA
+
+---
+
+### B. Periodic Re-evaluation
+
+* Re-score every 14 days
+
+#### Trigger Conditions:
+
+* New activity
+* Data enrichment updates
+
+---
+
+### C. Suppression Rules
+
+* If no engagement after X cycles (e.g., 60–90 days):
+  → Mark as inactive OR archive
+
+---
+
+### D. Minimal Resource Allocation
+
+* No SDR or sales intervention
+* Fully automated handling
+
+---
+
+## 6. System Requirements
+
+* All actions must be event-driven (triggered on score updates)
+
+* Ensure idempotency (no duplicate actions)
+
+* Maintain action logs:
+
+  * action_type
+  * timestamp
+  * status (success/failure)
+
+* Store:
+
+  * segment
+  * action history
+  * engagement signals
+
+---
+
+## 7. Output Format (API / UI)
+
+Return:
+
+{
+"score": number,
+"segment": "Hot | Warm | Nurture | Cold",
+"actions_triggered": [string],
+"next_action": string,
+"scheduled_time": datetime (if applicable),
+"status": "success | pending"
+}

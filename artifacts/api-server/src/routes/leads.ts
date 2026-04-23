@@ -1,11 +1,12 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
-import { db, leadsTable, leadActivitiesTable } from "@workspace/db";
+import { db, leadsTable, leadActivitiesTable, leadActionsTable } from "@workspace/db";
 import {
   UpsertLeadBody,
   GetLeadParams,
 } from "@workspace/api-zod";
 import { calculateLeadScore } from "../lib/lead-scoring";
+import { triggerActionsForLead } from "../lib/action-engine";
 
 const router: IRouter = Router();
 
@@ -120,6 +121,16 @@ router.post("/leads", async (req, res): Promise<void> => {
     "Lead upserted and scored"
   );
 
+  // Fire the action engine asynchronously — do NOT await so the response is fast
+  triggerActionsForLead(lead.id).then((result) => {
+    req.log.info(
+      { leadId: lead.id, actionsTriggered: result.actions_triggered, segment: result.segment },
+      "Action engine completed"
+    );
+  }).catch((err) => {
+    req.log.warn({ leadId: lead.id, err: String(err) }, "Action engine error — non-blocking");
+  });
+
   res.status(200).json(lead);
 });
 
@@ -188,6 +199,54 @@ router.get("/leads/:id/activities", async (req, res): Promise<void> => {
     .orderBy(leadActivitiesTable.createdAt);
 
   res.json(activities.reverse());
+});
+
+/**
+ * GET /leads/:id/actions — Get all action logs for a lead
+ */
+router.get("/leads/:id/actions", async (req, res): Promise<void> => {
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid lead ID" });
+    return;
+  }
+
+  const [lead] = await db.select().from(leadsTable).where(eq(leadsTable.id, id));
+  if (!lead) {
+    res.status(404).json({ error: "Lead not found" });
+    return;
+  }
+
+  const actions = await db
+    .select()
+    .from(leadActionsTable)
+    .where(eq(leadActionsTable.leadId, id))
+    .orderBy(leadActionsTable.createdAt);
+
+  res.json(actions.reverse());
+});
+
+/**
+ * POST /leads/:id/trigger-actions — Manually trigger the action engine for a lead
+ */
+router.post("/leads/:id/trigger-actions", async (req, res): Promise<void> => {
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid lead ID" });
+    return;
+  }
+
+  try {
+    const result = await triggerActionsForLead(id);
+    req.log.info({ leadId: id, result }, "Actions manually triggered");
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    req.log.error({ leadId: id, err: message }, "Failed to trigger actions");
+    res.status(500).json({ error: message });
+  }
 });
 
 export default router;
