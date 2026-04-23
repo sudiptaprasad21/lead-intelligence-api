@@ -484,11 +484,16 @@ router.post("/admin/sheets/workflow-health-sync", authMiddleware, async (_req, r
       .filter((r: any) => r.overdue);
 
     const formatRequests: any[] = [
-      // Bold row 1 (title)
+      // Bold row 1 (title) — soft indigo with dark purple text
       {
         repeatCell: {
           range: { sheetId: tabSheetId, startRowIndex: 0, endRowIndex: 1 },
-          cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 13 }, backgroundColor: { red: 0.13, green: 0.17, blue: 0.29 } } },
+          cell: {
+            userEnteredFormat: {
+              textFormat: { bold: true, fontSize: 13, foregroundColor: { red: 0.18, green: 0.13, blue: 0.42 } },
+              backgroundColor: { red: 0.84, green: 0.82, blue: 0.97 },
+            },
+          },
           fields: "userEnteredFormat(textFormat,backgroundColor)",
         },
       },
@@ -498,26 +503,36 @@ router.post("/admin/sheets/workflow-health-sync", authMiddleware, async (_req, r
       { autoResizeDimensions: { dimensions: { sheetId: tabSheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 12 } } },
     ];
 
-    // Bold section header rows (rows with "📊", "📋", "⚠️")
+    // Section header rows (rows with "📊", "📋", "⚠️") — very light lavender with muted purple text
     rows.forEach((row, idx) => {
       if (row[0]?.match(/^[📊📋⚠️]/u)) {
         formatRequests.push({
           repeatCell: {
             range: { sheetId: tabSheetId, startRowIndex: idx, endRowIndex: idx + 1 },
-            cell: { userEnteredFormat: { textFormat: { bold: true }, backgroundColor: { red: 0.15, green: 0.20, blue: 0.35 } } },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true, foregroundColor: { red: 0.30, green: 0.25, blue: 0.58 } },
+                backgroundColor: { red: 0.92, green: 0.91, blue: 0.99 },
+              },
+            },
             fields: "userEnteredFormat(textFormat,backgroundColor)",
           },
         });
       }
     });
 
-    // Red background for overdue action rows
+    // Light coral background + dark red text for overdue action rows
     for (const { idx } of overdueRows) {
       formatRequests.push({
         repeatCell: {
           range: { sheetId: tabSheetId, startRowIndex: idx, endRowIndex: idx + 1 },
-          cell: { userEnteredFormat: { backgroundColor: { red: 0.40, green: 0.10, blue: 0.10 } } },
-          fields: "userEnteredFormat(backgroundColor)",
+          cell: {
+            userEnteredFormat: {
+              backgroundColor: { red: 1.0, green: 0.88, blue: 0.88 },
+              textFormat: { foregroundColor: { red: 0.65, green: 0.12, blue: 0.12 }, bold: true },
+            },
+          },
+          fields: "userEnteredFormat(backgroundColor,textFormat)",
         },
       });
     }
