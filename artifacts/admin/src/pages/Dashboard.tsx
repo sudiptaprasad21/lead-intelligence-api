@@ -1,4 +1,5 @@
 import { useState, useEffect, Fragment } from "react";
+import nexPointLogo from "@assets/ChatGPT_Image_Apr_23,_2026,_05_53_31_PM_1776947023096.png";
 import { clearAuth, getUsername, adminFetch, API } from "@/lib/auth";
 import { useListLeads } from "@workspace/api-client-react";
 import {
@@ -314,9 +315,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       <header className="border-b border-border bg-card/50 backdrop-blur sticky top-0 z-10">
         <div className="max-w-[1400px] mx-auto px-6 h-14 flex items-center justify-between relative">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-7 h-7 rounded-md bg-primary/20 border border-primary/30">
-              <BarChart3 className="w-4 h-4 text-primary" />
-            </div>
+            <img src={nexPointLogo} alt="Nexpoint" className="h-7 w-auto rounded" />
             <span className="font-semibold text-sm">Nexpoint Admin</span>
             <span className="text-muted-foreground text-xs hidden sm:block">· Lead Intelligence Dashboard</span>
           </div>
