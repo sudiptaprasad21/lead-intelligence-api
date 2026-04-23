@@ -213,7 +213,6 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [leadActions, setLeadActions] = useState<any[]>([]);
   const [actionsLoading, setActionsLoading] = useState(false);
   const [triggering, setTriggering] = useState(false);
-  const [pdfingDashboard, setPdfingDashboard] = useState(false);
 
   // Workflow health state
   const [wfHealth, setWfHealth] = useState<WorkflowHealth | null>(null);
@@ -359,37 +358,138 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   }
 
   async function downloadInsightsPDF(period: string) {
-    if (!insightsRef.current) return;
+    const data = insights[period];
+    if (!data) return;
     setPdfingInsights(true);
     try {
-      const { default: html2canvas } = await import("html2canvas");
       const { jsPDF } = await import("jspdf");
-      const canvas = await html2canvas(insightsRef.current, { scale: 2, backgroundColor: "#0f1623", useCORS: true });
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({ orientation: "landscape", unit: "px", format: [canvas.width / 2, canvas.height / 2] });
-      pdf.addImage(imgData, "PNG", 0, 0, canvas.width / 2, canvas.height / 2);
-      pdf.save(`nexpoint-insights-${period}-${new Date().toISOString().slice(0, 10)}.pdf`);
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const W = 210; const M = 18; const CW = W - M * 2;
+      let y = M;
+
+      // Header bar
+      doc.setFillColor(30, 18, 60);
+      doc.rect(0, 0, W, 22, "F");
+      doc.setTextColor(200, 180, 255);
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.text("NEXPOINT  ·  LEAD INSIGHTS", M, 14);
+      doc.setTextColor(160, 140, 210);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Generated ${new Date(data.generatedAt).toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}`, W - M, 14, { align: "right" });
+      y = 32;
+
+      // Title
+      doc.setTextColor(30, 20, 60);
+      doc.setFontSize(20);
+      doc.setFont("helvetica", "bold");
+      doc.text(`${period.charAt(0).toUpperCase() + period.slice(1)} Insights`, M, y);
+      y += 7;
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100, 90, 130);
+      doc.text(`Period: ${data.periodLabel}  ·  AI-Generated Executive Intelligence`, M, y);
+      y += 10;
+
+      // Divider
+      doc.setDrawColor(200, 190, 240);
+      doc.line(M, y, W - M, y);
+      y += 8;
+
+      // Summary metric tiles (2 rows × 3 cols)
+      const metrics = [
+        { label: "New Leads",   value: String(data.summary.newLeads) },
+        { label: "Hot (SQL)",   value: String(data.summary.hot) },
+        { label: "Warm (MQL)", value: String(data.summary.warm) },
+        { label: "Avg Score",   value: `${data.summary.avgScore}/100` },
+        { label: "Delivered",  value: String(data.summary.deliveredActions) },
+        { label: "Failed",     value: String(data.summary.failedActions) },
+      ];
+      const cols = 3; const tileW = CW / cols; const tileH = 18;
+      metrics.forEach((m, i) => {
+        const col = i % cols; const row = Math.floor(i / cols);
+        const tx = M + col * tileW; const ty = y + row * (tileH + 3);
+        doc.setFillColor(245, 243, 255);
+        doc.roundedRect(tx, ty, tileW - 3, tileH, 2, 2, "F");
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(80, 40, 160);
+        doc.text(m.value, tx + 5, ty + 11);
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(120, 100, 160);
+        doc.text(m.label, tx + 5, ty + 16);
+      });
+      y += 2 * (tileH + 3) + 10;
+
+      // Section heading
+      doc.setFillColor(80, 40, 160);
+      doc.rect(M, y, 3, 8, "F");
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(40, 20, 80);
+      doc.text("AI Analysis — Executive Recommendations", M + 6, y + 6);
+      y += 14;
+
+      // Bullet points
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(30, 20, 50);
+      data.bullets.forEach((bullet, i) => {
+        // Number circle
+        doc.setFillColor(100, 60, 200);
+        doc.circle(M + 3.5, y + 1, 3.5, "F");
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "bold");
+        doc.text(String(i + 1), M + 3.5, y + 2, { align: "center" });
+        // Bullet text — wrap at CW - 12
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(30, 20, 50);
+        const lines = doc.splitTextToSize(bullet, CW - 12);
+        doc.text(lines, M + 10, y + 2);
+        y += lines.length * 6 + 5;
+      });
+
+      // Footer
+      y = Math.max(y + 10, 272);
+      doc.setDrawColor(200, 190, 240);
+      doc.line(M, y, W - M, y);
+      y += 5;
+      doc.setFontSize(8);
+      doc.setTextColor(150, 140, 180);
+      doc.text("Nexpoint Admin · Lead Intelligence · Confidential", M, y);
+      doc.text(`Page 1`, W - M, y, { align: "right" });
+
+      doc.save(`nexpoint-insights-${period}-${new Date().toISOString().slice(0, 10)}.pdf`);
     } finally {
       setPdfingInsights(false);
     }
   }
 
-  async function downloadDashboardPDF() {
-    if (!dashboardRef.current) return;
-    setPdfingDashboard(true);
-    try {
-      const { default: html2canvas } = await import("html2canvas");
-      const { jsPDF } = await import("jspdf");
-      const canvas = await html2canvas(dashboardRef.current, { scale: 1.5, backgroundColor: "#0f1623", useCORS: true, windowHeight: dashboardRef.current.scrollHeight });
-      const imgData = canvas.toDataURL("image/png");
-      const pdfW = 1190;
-      const pdfH = Math.round((canvas.height / canvas.width) * pdfW);
-      const pdf = new jsPDF({ orientation: pdfW > pdfH ? "landscape" : "portrait", unit: "px", format: [pdfW, pdfH] });
-      pdf.addImage(imgData, "PNG", 0, 0, pdfW, pdfH);
-      pdf.save(`nexpoint-dashboard-${new Date().toISOString().slice(0, 10)}.pdf`);
-    } finally {
-      setPdfingDashboard(false);
+  function downloadDashboardPDF() {
+    // Inject a temporary <style> block that defines print-friendly layout,
+    // then trigger the browser's native Save-as-PDF dialog (handles oklab fine).
+    const styleId = "nexpoint-print-style";
+    if (!document.getElementById(styleId)) {
+      const s = document.createElement("style");
+      s.id = styleId;
+      s.textContent = `
+        @media print {
+          body > *:not(#root) { display: none !important; }
+          header.sticky { position: static !important; }
+          .border-b { border: none !important; }
+          button, [role="button"] { display: none !important; }
+          .space-y-8 > * { break-inside: avoid; }
+          @page { size: A3 landscape; margin: 12mm; }
+        }
+      `;
+      document.head.appendChild(s);
     }
+    window.print();
+    // Remove print style after dialog closes (slight delay)
+    setTimeout(() => document.getElementById(styleId)?.remove(), 2000);
   }
 
   function handleLogout() {
@@ -472,14 +572,9 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               variant="outline"
               size="sm"
               onClick={downloadDashboardPDF}
-              disabled={pdfingDashboard}
               className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/10"
             >
-              {pdfingDashboard ? (
-                <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Generating…</>
-              ) : (
-                <><Download className="w-3.5 h-3.5 mr-1.5" /> Download PDF</>
-              )}
+              <Download className="w-3.5 h-3.5 mr-1.5" /> Download PDF
             </Button>
             <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={isFetching || statsLoading}>
               <RefreshCw className={`w-4 h-4 ${isFetching || statsLoading ? "animate-spin" : ""}`} />
