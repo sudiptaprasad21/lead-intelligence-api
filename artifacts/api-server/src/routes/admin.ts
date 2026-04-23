@@ -1,8 +1,45 @@
 import { Router } from "express";
 import crypto from "crypto";
-import { db, leadsTable } from "@workspace/db";
-// @replit/connectors-sdk — Google Sheets integration
+import { db, leadsTable, leadActionsTable } from "@workspace/db";
+// @replit/connectors-sdk — Google Sheets + Gmail integration
 import { ReplitConnectors } from "@replit/connectors-sdk";
+import { eq } from "drizzle-orm";
+
+// ─── Workflow SLA Definitions ─────────────────────────────────────────────
+// null = no SLA (scheduled future drip / cold). Measured in minutes from createdAt.
+const ACTION_SLA_MINS: Record<string, number | null> = {
+  immediate_sales_call: 60,
+  telegram_outreach:    60,
+  whatsapp_outreach:    60,
+  email_outreach:       30,
+  sdr_followup:         1440,
+  drip_email_day0:      60,
+  drip_email_day3:      null,
+  drip_email_day7:      null,
+  drip_email_day14:     null,
+  retargeting_trigger:  120,
+  cold_drip:            null,
+  periodic_reeval:      null,
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  immediate_sales_call: "Sales Call",
+  telegram_outreach:    "Telegram",
+  whatsapp_outreach:    "WhatsApp (legacy)",
+  email_outreach:       "Email Outreach",
+  sdr_followup:         "SDR Follow-Up",
+  drip_email_day0:      "Drip Day 0",
+  drip_email_day3:      "Drip Day 3",
+  drip_email_day7:      "Drip Day 7",
+  drip_email_day14:     "Drip Day 14",
+  retargeting_trigger:  "Retargeting",
+  cold_drip:            "Cold Drip",
+  periodic_reeval:      "Re-Evaluation",
+};
+
+// The user's existing Google Workbook to write the Workflow Health sheet into
+const WORKFLOW_SHEET_ID = "1mE5u20YienuuUYiihyLIrKiQT0oTtt0TwJCpX3YGLe0";
+const WORKFLOW_TAB_NAME = "Workflow Health";
 
 const router = Router();
 
@@ -252,6 +289,254 @@ router.get("/admin/sheets/info", authMiddleware, async (_req, res) => {
     url: `https://docs.google.com/spreadsheets/d/${cachedSpreadsheetId}`,
     spreadsheetId: cachedSpreadsheetId,
   });
+});
+
+// ─── Workflow Health ───────────────────────────────────────────────────────
+
+function buildWorkflowHealth(actions: any[], now: Date) {
+  const enriched = actions.map((a: any) => {
+    const slaMins = ACTION_SLA_MINS[a.actionType] ?? null;
+    const ageMins = Math.round((now.getTime() - new Date(a.createdAt).getTime()) / 60000);
+    const isActionable = a.status === "pending" || a.status === "failed";
+    const overdue = isActionable && slaMins !== null && ageMins > slaMins;
+    return { ...a, slaMins, ageMins, overdue, overdueByMins: overdue ? ageMins - slaMins! : 0 };
+  });
+
+  const total     = enriched.length;
+  const delivered = enriched.filter(a => a.status === "delivered" || a.status === "success").length;
+  const pending   = enriched.filter(a => a.status === "pending").length;
+  const scheduled = enriched.filter(a => a.status === "scheduled").length;
+  const failed    = enriched.filter(a => a.status === "failed").length;
+  const overdue   = enriched.filter(a => a.overdue).length;
+  const actionable = total - scheduled;
+  const healthScore = actionable > 0 ? Math.max(0, Math.round((delivered / actionable) * 100)) : 100;
+
+  const typeMap: Record<string, any> = {};
+  for (const a of enriched) {
+    if (!typeMap[a.actionType]) {
+      typeMap[a.actionType] = {
+        actionType: a.actionType, label: ACTION_LABELS[a.actionType] ?? a.actionType,
+        total: 0, delivered: 0, pending: 0, scheduled: 0, failed: 0, overdue: 0,
+      };
+    }
+    typeMap[a.actionType].total++;
+    if (a.status === "delivered" || a.status === "success") typeMap[a.actionType].delivered++;
+    else if (a.status === "pending") typeMap[a.actionType].pending++;
+    else if (a.status === "scheduled") typeMap[a.actionType].scheduled++;
+    else if (a.status === "failed") typeMap[a.actionType].failed++;
+    if (a.overdue) typeMap[a.actionType].overdue++;
+  }
+
+  const pendingActions = enriched
+    .filter(a => a.status === "pending" || a.status === "failed")
+    .sort((a, b) => {
+      if (a.overdue && !b.overdue) return -1;
+      if (!a.overdue && b.overdue) return 1;
+      return b.ageMins - a.ageMins;
+    })
+    .map(a => ({
+      id: a.id, leadId: a.leadId, leadName: a.leadName, email: a.email,
+      companyName: a.companyName, jobTitle: a.jobTitle,
+      actionType: a.actionType, label: ACTION_LABELS[a.actionType] ?? a.actionType,
+      segment: a.segment, status: a.status,
+      createdAt: a.createdAt, scheduledAt: a.scheduledAt,
+      slaMins: a.slaMins, ageMins: a.ageMins, overdue: a.overdue, overdueByMins: a.overdueByMins,
+    }));
+
+  return {
+    summary: { total, delivered, pending, scheduled, failed, overdue, healthScore },
+    byType: Object.values(typeMap).sort((a: any, b: any) => b.total - a.total),
+    pendingActions,
+    generatedAt: now.toISOString(),
+  };
+}
+
+// GET /admin/workflow-health — live SLA-tracked action metrics
+router.get("/admin/workflow-health", authMiddleware, async (_req, res) => {
+  try {
+    const actions = await db
+      .select({
+        id: leadActionsTable.id, leadId: leadActionsTable.leadId,
+        actionType: leadActionsTable.actionType, segment: leadActionsTable.segment,
+        status: leadActionsTable.status, scheduledAt: leadActionsTable.scheduledAt,
+        executedAt: leadActionsTable.executedAt, createdAt: leadActionsTable.createdAt,
+        leadName: leadsTable.fullName, email: leadsTable.email,
+        companyName: leadsTable.companyName, jobTitle: leadsTable.jobTitle,
+      })
+      .from(leadActionsTable)
+      .leftJoin(leadsTable, eq(leadActionsTable.leadId, leadsTable.id));
+
+    res.json(buildWorkflowHealth(actions, new Date()));
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Failed to fetch workflow health" });
+  }
+});
+
+// POST /admin/sheets/workflow-health-sync — writes Workflow Health tab to the user's workbook
+router.post("/admin/sheets/workflow-health-sync", authMiddleware, async (_req, res) => {
+  try {
+    const connectors = new ReplitConnectors();
+    const now = new Date();
+
+    const actions = await db
+      .select({
+        id: leadActionsTable.id, leadId: leadActionsTable.leadId,
+        actionType: leadActionsTable.actionType, segment: leadActionsTable.segment,
+        status: leadActionsTable.status, scheduledAt: leadActionsTable.scheduledAt,
+        executedAt: leadActionsTable.executedAt, createdAt: leadActionsTable.createdAt,
+        leadName: leadsTable.fullName, email: leadsTable.email,
+        companyName: leadsTable.companyName, jobTitle: leadsTable.jobTitle,
+      })
+      .from(leadActionsTable)
+      .leftJoin(leadsTable, eq(leadActionsTable.leadId, leadsTable.id));
+
+    const health = buildWorkflowHealth(actions, now);
+    const { summary, byType, pendingActions } = health;
+
+    // Ensure "Workflow Health" tab exists — add if missing
+    const sheetListRes = await connectors.proxy(
+      "google-sheet",
+      `/v4/spreadsheets/${WORKFLOW_SHEET_ID}?fields=sheets.properties`,
+    );
+    const sheetList = await sheetListRes.json() as any;
+    const existingSheet = sheetList.sheets?.find((s: any) => s.properties?.title === WORKFLOW_TAB_NAME);
+    let tabSheetId: number;
+
+    if (!existingSheet) {
+      const addRes = await connectors.proxy("google-sheet", `/v4/spreadsheets/${WORKFLOW_SHEET_ID}:batchUpdate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requests: [{ addSheet: { properties: { title: WORKFLOW_TAB_NAME } } }] }),
+      });
+      const addData = await addRes.json() as any;
+      tabSheetId = addData.replies?.[0]?.addSheet?.properties?.sheetId ?? 1;
+    } else {
+      tabSheetId = existingSheet.properties.sheetId;
+    }
+
+    // Clear the tab
+    await connectors.proxy("google-sheet", `/v4/spreadsheets/${WORKFLOW_SHEET_ID}/values/${encodeURIComponent(WORKFLOW_TAB_NAME)}:clear`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    function fmtAge(mins: number) {
+      if (mins < 60) return `${mins}m`;
+      if (mins < 1440) return `${Math.round(mins / 60)}h`;
+      return `${Math.round(mins / 1440)}d`;
+    }
+
+    // Build sheet data
+    const rows: string[][] = [
+      // Title
+      ["NEXPOINT — WORKFLOW HEALTH MONITOR"],
+      [`Last synced: ${now.toLocaleString("en-US")}`, "", "", "", "", "", ""],
+      [""],
+      // Summary section
+      ["📊 SUMMARY", ""],
+      ["Metric", "Value"],
+      ["Total Actions", String(summary.total)],
+      ["Delivered / Success", String(summary.delivered)],
+      ["Pending", String(summary.pending)],
+      ["Scheduled (future)", String(summary.scheduled)],
+      ["Failed", String(summary.failed)],
+      ["Overdue (past SLA)", String(summary.overdue)],
+      ["Workflow Health Score", `${summary.healthScore}%`],
+      [""],
+      // Action type breakdown
+      ["📋 ACTION TYPE BREAKDOWN", ""],
+      ["Action Type", "Total", "Delivered", "Pending", "Scheduled", "Failed", "Overdue"],
+      ...byType.map((t: any) => [
+        t.label, String(t.total), String(t.delivered),
+        String(t.pending), String(t.scheduled), String(t.failed), String(t.overdue),
+      ]),
+      [""],
+      // Pending / overdue table
+      [`⚠️ PENDING & OVERDUE ACTIONS (${pendingActions.length})`, ""],
+      ["Lead Name", "Company", "Role", "Segment", "Action", "Status", "Age", "SLA", "Overdue?", "Overdue By", "Created At", "Email"],
+      ...pendingActions.map((a: any) => [
+        a.leadName ?? "—", a.companyName ?? "—", a.jobTitle ?? "—",
+        a.segment, a.label, a.status.toUpperCase(),
+        fmtAge(a.ageMins),
+        a.slaMins ? fmtAge(a.slaMins) : "N/A",
+        a.overdue ? "YES" : "No",
+        a.overdue ? fmtAge(a.overdueByMins) : "—",
+        new Date(a.createdAt).toLocaleString("en-US"),
+        a.email ?? "—",
+      ]),
+    ];
+
+    await connectors.proxy(
+      "google-sheet",
+      `/v4/spreadsheets/${WORKFLOW_SHEET_ID}/values/${encodeURIComponent(WORKFLOW_TAB_NAME)}!A1:append?valueInputOption=RAW&insertDataOption=OVERWRITE`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ values: rows }),
+      }
+    );
+
+    // Format: bold headers, freeze row 1, colour overdue rows red
+    const dataStartRow = rows.findIndex(r => r[0] === "Lead Name");
+    const overdueRows = pendingActions
+      .map((a: any, i: number) => ({ idx: dataStartRow + 1 + i, overdue: a.overdue }))
+      .filter((r: any) => r.overdue);
+
+    const formatRequests: any[] = [
+      // Bold row 1 (title)
+      {
+        repeatCell: {
+          range: { sheetId: tabSheetId, startRowIndex: 0, endRowIndex: 1 },
+          cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 13 }, backgroundColor: { red: 0.13, green: 0.17, blue: 0.29 } } },
+          fields: "userEnteredFormat(textFormat,backgroundColor)",
+        },
+      },
+      // Freeze top 2 rows
+      { updateSheetProperties: { properties: { sheetId: tabSheetId, gridProperties: { frozenRowCount: 2 } }, fields: "gridProperties.frozenRowCount" } },
+      // Auto-resize all columns
+      { autoResizeDimensions: { dimensions: { sheetId: tabSheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 12 } } },
+    ];
+
+    // Bold section header rows (rows with "📊", "📋", "⚠️")
+    rows.forEach((row, idx) => {
+      if (row[0]?.match(/^[📊📋⚠️]/u)) {
+        formatRequests.push({
+          repeatCell: {
+            range: { sheetId: tabSheetId, startRowIndex: idx, endRowIndex: idx + 1 },
+            cell: { userEnteredFormat: { textFormat: { bold: true }, backgroundColor: { red: 0.15, green: 0.20, blue: 0.35 } } },
+            fields: "userEnteredFormat(textFormat,backgroundColor)",
+          },
+        });
+      }
+    });
+
+    // Red background for overdue action rows
+    for (const { idx } of overdueRows) {
+      formatRequests.push({
+        repeatCell: {
+          range: { sheetId: tabSheetId, startRowIndex: idx, endRowIndex: idx + 1 },
+          cell: { userEnteredFormat: { backgroundColor: { red: 0.40, green: 0.10, blue: 0.10 } } },
+          fields: "userEnteredFormat(backgroundColor)",
+        },
+      });
+    }
+
+    await connectors.proxy("google-sheet", `/v4/spreadsheets/${WORKFLOW_SHEET_ID}:batchUpdate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requests: formatRequests }),
+    });
+
+    res.json({
+      success: true,
+      url: `https://docs.google.com/spreadsheets/d/${WORKFLOW_SHEET_ID}`,
+      summary,
+      syncedAt: now.toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Workflow health sync failed" });
+  }
 });
 
 export default router;

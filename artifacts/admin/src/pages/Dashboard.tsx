@@ -86,6 +86,35 @@ interface Stats {
   score_distribution: { range: string; count: number }[];
 }
 
+interface WorkflowSummary {
+  total: number; delivered: number; pending: number;
+  scheduled: number; failed: number; overdue: number; healthScore: number;
+}
+interface WorkflowByType {
+  actionType: string; label: string;
+  total: number; delivered: number; pending: number;
+  scheduled: number; failed: number; overdue: number;
+}
+interface WorkflowPendingAction {
+  id: number; leadId: number; leadName: string | null; email: string | null;
+  companyName: string | null; jobTitle: string | null;
+  actionType: string; label: string; segment: string; status: string;
+  createdAt: string; slaMins: number | null; ageMins: number;
+  overdue: boolean; overdueByMins: number;
+}
+interface WorkflowHealth {
+  summary: WorkflowSummary;
+  byType: WorkflowByType[];
+  pendingActions: WorkflowPendingAction[];
+  generatedAt: string;
+}
+
+function fmtAge(mins: number): string {
+  if (mins < 60) return `${mins}m`;
+  if (mins < 1440) return `${Math.round(mins / 60)}h ${mins % 60}m`;
+  return `${Math.round(mins / 1440)}d`;
+}
+
 const ACTION_META: Record<string, { icon: any; label: string; color: string }> = {
   immediate_sales_call:  { icon: Phone,          label: "Sales Call",          color: "text-red-400" },
   telegram_outreach:     { icon: MessageSquare,   label: "Telegram",            color: "text-blue-400" },
@@ -103,6 +132,7 @@ const ACTION_META: Record<string, { icon: any; label: string; color: string }> =
 
 const STATUS_META: Record<string, { icon: any; label: string; cls: string }> = {
   success:   { icon: CheckCircle2, label: "Success",   cls: "text-green-400 bg-green-500/10 border-green-500/25" },
+  delivered: { icon: CheckCircle2, label: "Delivered", cls: "text-green-400 bg-green-500/10 border-green-500/25" },
   pending:   { icon: Timer,        label: "Pending",    cls: "text-orange-400 bg-orange-500/10 border-orange-500/25" },
   scheduled: { icon: Calendar,     label: "Scheduled",  cls: "text-blue-400 bg-blue-500/10 border-blue-500/25" },
   failed:    { icon: AlertCircle,  label: "Failed",     cls: "text-red-400 bg-red-500/10 border-red-500/25" },
@@ -132,6 +162,12 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [actionsLoading, setActionsLoading] = useState(false);
   const [triggering, setTriggering] = useState(false);
 
+  // Workflow health state
+  const [wfHealth, setWfHealth] = useState<WorkflowHealth | null>(null);
+  const [wfLoading, setWfLoading] = useState(true);
+  const [wfSyncing, setWfSyncing] = useState(false);
+  const [wfSyncMsg, setWfSyncMsg] = useState("");
+
   const { data: leads = [], isLoading, refetch, isFetching } = useListLeads();
 
   async function loadStats() {
@@ -144,8 +180,39 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     }
   }
 
+  async function loadWorkflowHealth() {
+    setWfLoading(true);
+    try {
+      const res = await adminFetch("/admin/workflow-health");
+      if (res.ok) setWfHealth(await res.json());
+    } finally {
+      setWfLoading(false);
+    }
+  }
+
+  async function handleSyncWorkflowHealth() {
+    setWfSyncing(true);
+    setWfSyncMsg("");
+    try {
+      const res = await adminFetch("/admin/sheets/workflow-health-sync", { method: "POST" });
+      const data = await res.json() as any;
+      if (res.ok) {
+        setWfSyncMsg("Synced to Google Sheets");
+        await loadWorkflowHealth();
+      } else {
+        setWfSyncMsg(data.error ?? "Sync failed");
+      }
+    } catch {
+      setWfSyncMsg("Network error — sync failed");
+    } finally {
+      setWfSyncing(false);
+      setTimeout(() => setWfSyncMsg(""), 6000);
+    }
+  }
+
   useEffect(() => {
     loadStats();
+    loadWorkflowHealth();
     // Check if a sheet already exists for this session
     adminFetch("/admin/sheets/info")
       .then(r => r.json())
@@ -176,6 +243,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   function handleRefresh() {
     refetch();
     loadStats();
+    loadWorkflowHealth();
   }
 
   async function loadLeadActions(leadId: number) {
@@ -469,6 +537,231 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
             </CardContent>
           </Card>
         )}
+
+        {/* ── Workflow Monitor ──────────────────────────────────────── */}
+        <Card className="border-card-border">
+          <CardHeader className="pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <Timer className="w-4 h-4 text-primary" />
+                  Workflow Monitor
+                </CardTitle>
+                <CardDescription className="text-xs mt-0.5">
+                  Action queue, SLA tracking, and delivery health
+                  {wfHealth && (
+                    <span className="ml-2 text-[10px] text-muted-foreground/60">
+                      · Updated {new Date(wfHealth.generatedAt).toLocaleTimeString()}
+                    </span>
+                  )}
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2 relative">
+                {wfSyncMsg && (
+                  <span className={`absolute -top-8 right-0 text-[10px] px-2 py-1 rounded border shadow-md whitespace-nowrap ${
+                    wfSyncMsg.includes("failed") || wfSyncMsg.includes("error")
+                      ? "bg-destructive/20 text-destructive border-destructive/30"
+                      : "bg-green-500/15 text-green-400 border-green-500/25"
+                  }`}>{wfSyncMsg}</span>
+                )}
+                <Button
+                  size="sm" variant="outline"
+                  onClick={handleSyncWorkflowHealth}
+                  disabled={wfSyncing}
+                  className="h-8 text-xs border-green-500/30 text-green-400 hover:bg-green-500/10"
+                >
+                  {wfSyncing
+                    ? <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Syncing…</>
+                    : <><Sheet className="w-3.5 h-3.5 mr-1.5" /> Sync to Sheet</>}
+                </Button>
+                <a
+                  href="https://docs.google.com/spreadsheets/d/1mE5u20YienuuUYiihyLIrKiQT0oTtt0TwJCpX3YGLe0"
+                  target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium bg-green-500/15 text-green-400 border border-green-500/25 hover:bg-green-500/25 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Open Workbook
+                </a>
+                <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={loadWorkflowHealth} disabled={wfLoading}>
+                  <RefreshCw className={`w-3.5 h-3.5 ${wfLoading ? "animate-spin" : ""}`} />
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {wfLoading && !wfHealth ? (
+              <div className="text-xs text-muted-foreground py-6 text-center">Loading workflow data…</div>
+            ) : wfHealth ? (
+              <>
+                {/* KPI summary cards */}
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
+                  {[
+                    { label: "Total Actions",   value: wfHealth.summary.total,     color: "text-primary",    bg: "bg-primary/10" },
+                    { label: "Delivered",        value: wfHealth.summary.delivered, color: "text-green-400",  bg: "bg-green-500/10" },
+                    { label: "Pending",          value: wfHealth.summary.pending,   color: "text-orange-400", bg: "bg-orange-500/10" },
+                    { label: "Scheduled",        value: wfHealth.summary.scheduled, color: "text-blue-400",   bg: "bg-blue-500/10" },
+                    { label: "Failed",           value: wfHealth.summary.failed,    color: "text-red-400",    bg: "bg-red-500/10" },
+                    { label: "Overdue (past SLA)", value: wfHealth.summary.overdue, color: "text-red-400",    bg: "bg-red-500/10" },
+                    {
+                      label: "Health Score",
+                      value: `${wfHealth.summary.healthScore}%`,
+                      color: wfHealth.summary.healthScore >= 80 ? "text-green-400" : wfHealth.summary.healthScore >= 60 ? "text-yellow-400" : "text-red-400",
+                      bg: wfHealth.summary.healthScore >= 80 ? "bg-green-500/10" : wfHealth.summary.healthScore >= 60 ? "bg-yellow-500/10" : "bg-red-500/10",
+                    },
+                  ].map(({ label, value, color, bg }) => (
+                    <div key={label} className={`rounded-lg border border-border/50 px-3 py-2.5 ${bg}`}>
+                      <div className={`text-xl font-bold ${color}`}>{value}</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Health score bar */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span>Workflow health</span>
+                    <span className={
+                      wfHealth.summary.healthScore >= 80 ? "text-green-400 font-medium" :
+                      wfHealth.summary.healthScore >= 60 ? "text-yellow-400 font-medium" :
+                      "text-red-400 font-medium"
+                    }>{wfHealth.summary.healthScore}% delivered</span>
+                  </div>
+                  <div className="h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-700"
+                      style={{
+                        width: `${wfHealth.summary.healthScore}%`,
+                        backgroundColor: wfHealth.summary.healthScore >= 80 ? "#22c55e" : wfHealth.summary.healthScore >= 60 ? "#eab308" : "#ef4444",
+                      }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[9px] text-muted-foreground/50">
+                    <span>0%</span><span>Critical &lt;60%</span><span>Good &gt;80%</span><span>100%</span>
+                  </div>
+                </div>
+
+                {/* Two-column: by-type breakdown + pending/overdue table */}
+                <div className="grid grid-cols-1 xl:grid-cols-5 gap-5">
+                  {/* By-type breakdown */}
+                  <div className="xl:col-span-2">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">By Action Type</p>
+                    <div className="rounded-lg border border-border/50 overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-muted/30 border-b border-border/50">
+                            {["Action", "Done", "Pending", "Sched.", "Failed", "Overdue"].map(h => (
+                              <th key={h} className="px-2.5 py-2 text-left text-[10px] font-medium text-muted-foreground whitespace-nowrap">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {wfHealth.byType.map((t) => (
+                            <tr key={t.actionType} className="border-b border-border/30 hover:bg-muted/10 transition-colors">
+                              <td className="px-2.5 py-2 font-medium text-[10px] whitespace-nowrap">{t.label}</td>
+                              <td className="px-2.5 py-2">
+                                <span className={t.delivered > 0 ? "text-green-400 font-semibold" : "text-muted-foreground"}>{t.delivered}</span>
+                              </td>
+                              <td className="px-2.5 py-2">
+                                <span className={t.pending > 0 ? "text-orange-400" : "text-muted-foreground"}>{t.pending}</span>
+                              </td>
+                              <td className="px-2.5 py-2 text-muted-foreground">{t.scheduled}</td>
+                              <td className="px-2.5 py-2">
+                                <span className={t.failed > 0 ? "text-red-400 font-semibold" : "text-muted-foreground"}>{t.failed}</span>
+                              </td>
+                              <td className="px-2.5 py-2">
+                                <span className={t.overdue > 0 ? "text-red-400 font-bold" : "text-muted-foreground"}>{t.overdue}</span>
+                              </td>
+                            </tr>
+                          ))}
+                          {wfHealth.byType.length === 0 && (
+                            <tr>
+                              <td colSpan={6} className="px-2.5 py-4 text-center text-muted-foreground text-[10px]">No actions recorded yet</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Pending / overdue actions detail */}
+                  <div className="xl:col-span-3">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                      Pending & Overdue Queue
+                      {wfHealth.pendingActions.length > 0 && (
+                        <span className="ml-1.5 px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400 border border-orange-500/25 text-[9px]">
+                          {wfHealth.pendingActions.length}
+                        </span>
+                      )}
+                    </p>
+                    <div className="rounded-lg border border-border/50 overflow-hidden max-h-72 overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-card z-10">
+                          <tr className="bg-muted/40 border-b border-border/50">
+                            {["Lead", "Action", "Status", "Age", "SLA", "Overdue By"].map(h => (
+                              <th key={h} className="px-2.5 py-2 text-left text-[10px] font-medium text-muted-foreground whitespace-nowrap">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {wfHealth.pendingActions.map((a) => (
+                            <tr
+                              key={a.id}
+                              className={`border-b border-border/30 transition-colors ${
+                                a.overdue
+                                  ? "bg-red-500/5 hover:bg-red-500/10 border-l-2 border-l-red-500/50"
+                                  : "hover:bg-muted/10"
+                              }`}
+                            >
+                              <td className="px-2.5 py-2">
+                                <div className="font-medium text-[10px] whitespace-nowrap">{a.leadName ?? "—"}</div>
+                                <div className="text-[9px] text-muted-foreground">{a.companyName ?? ""}</div>
+                              </td>
+                              <td className="px-2.5 py-2">
+                                <div className="text-[10px] whitespace-nowrap">{a.label}</div>
+                                <SegmentBadge segment={a.segment} />
+                              </td>
+                              <td className="px-2.5 py-2">
+                                <ActionStatusBadge status={a.status} />
+                              </td>
+                              <td className="px-2.5 py-2 text-[10px] text-muted-foreground whitespace-nowrap font-mono">
+                                {fmtAge(a.ageMins)}
+                              </td>
+                              <td className="px-2.5 py-2 text-[10px] text-muted-foreground whitespace-nowrap font-mono">
+                                {a.slaMins !== null ? fmtAge(a.slaMins) : <span className="italic opacity-50">N/A</span>}
+                              </td>
+                              <td className="px-2.5 py-2 whitespace-nowrap">
+                                {a.overdue ? (
+                                  <span className="text-red-400 font-bold text-[10px] font-mono">+{fmtAge(a.overdueByMins)}</span>
+                                ) : (
+                                  <span className="text-green-400 text-[10px]">On time</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                          {wfHealth.pendingActions.length === 0 && (
+                            <tr>
+                              <td colSpan={6} className="px-2.5 py-6 text-center text-muted-foreground text-[10px]">
+                                <CheckCircle2 className="w-4 h-4 inline mr-1.5 text-green-400" />
+                                All actions delivered — no pending items
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    {wfHealth.pendingActions.some(a => a.overdue) && (
+                      <p className="text-[10px] text-red-400/70 mt-1.5 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        Red rows have exceeded their SLA. Investigate and re-trigger as needed.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="text-xs text-muted-foreground py-6 text-center">No workflow data available</div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Leads Table */}
         <Card className="border-card-border">
