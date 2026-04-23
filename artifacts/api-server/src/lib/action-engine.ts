@@ -194,8 +194,8 @@ async function triggerHotActions(lead: Lead): Promise<string[]> {
       tgKey,
       tgResult.success ? "delivered" : "failed",
       tgResult.success
-        ? { deliveredAt: new Date().toISOString(), telegramMessageId: tgResult.messageId }
-        : { error: tgResult.error }
+        ? { messageSource: msg.source, leadName: lead.fullName, company: lead.companyName, role: lead.jobTitle, deliveredAt: new Date().toISOString(), telegramMessageId: tgResult.messageId }
+        : { messageSource: msg.source, leadName: lead.fullName, company: lead.companyName, role: lead.jobTitle, error: tgResult.error }
     );
 
     triggered.push("telegram_outreach");
