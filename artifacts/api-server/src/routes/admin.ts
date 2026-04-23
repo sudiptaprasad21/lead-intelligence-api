@@ -1,6 +1,8 @@
 import { Router } from "express";
 import crypto from "crypto";
 import { db, leadsTable } from "@workspace/db";
+// @replit/connectors-sdk — Google Sheets integration
+import { ReplitConnectors } from "@replit/connectors-sdk";
 
 const router = Router();
 
@@ -111,6 +113,144 @@ router.get("/admin/stats", authMiddleware, async (_req, res) => {
     source_counts: sourceCounts,
     form_type_counts: formTypeCounts,
     score_distribution: scoreDistribution,
+  });
+});
+
+// Store spreadsheet ID in memory (persists for lifetime of the server process)
+let cachedSpreadsheetId: string | null = null;
+
+function ctaLabel(formType: string | null | undefined, campaign: string | null | undefined): string {
+  if (campaign?.startsWith("pricing_")) return "Pricing Modal";
+  if (campaign?.includes("homepage_trial")) return "Trial Form";
+  if (campaign?.includes("homepage_demo")) return "Demo Form";
+  if (campaign?.includes("summit") || campaign?.includes("event") || campaign?.includes("growth_summit")) return "Event Form";
+  if (formType === "free_trial") return "Trial Form";
+  if (formType === "demo_request") return "Demo Form";
+  if (formType === "event_registration") return "Event Form";
+  return formType ?? "—";
+}
+
+// POST /admin/sheets/sync — creates or refreshes the Google Sheet with all lead data
+router.post("/admin/sheets/sync", authMiddleware, async (_req, res) => {
+  const connectors = new ReplitConnectors();
+
+  const allLeads = await db.select().from(leadsTable);
+
+  const headers = [
+    "ID", "Full Name", "Email", "Company", "Job Title",
+    "Company Size", "Industry", "Lead Source", "CTA Source", "Campaign",
+    "Marketing Challenge", "Segment", "Total Score",
+    "Intent (0-40)", "Fit (0-30)", "Behavior (0-20)", "Source (0-10)",
+    "Last Activity", "Captured On",
+  ];
+
+  const rows = allLeads.map(l => [
+    String(l.id),
+    l.fullName,
+    l.email,
+    l.companyName,
+    l.jobTitle ?? "",
+    l.companySize ?? "",
+    l.industry ?? "",
+    l.referralSource ?? l.leadSource ?? "",
+    ctaLabel(l.formType, l.campaign),
+    l.campaign ?? "",
+    l.marketingChallenge ?? "",
+    l.segment,
+    String(l.totalScore ?? 0),
+    String(l.intentScore ?? 0),
+    String(l.fitScore ?? 0),
+    String(l.behaviorScore ?? 0),
+    String(l.sourceScore ?? 0),
+    l.lastActivityAt ? new Date(l.lastActivityAt).toLocaleDateString("en-US") : "",
+    new Date(l.createdAt).toLocaleDateString("en-US"),
+  ]);
+
+  try {
+    // Create a new spreadsheet if we don't have one yet
+    if (!cachedSpreadsheetId) {
+      const createRes = await connectors.proxy("google-sheet", "/v4/spreadsheets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          properties: { title: "Nexpoint Leads — Live Data" },
+          sheets: [{
+            properties: { title: "Leads" },
+          }],
+        }),
+      });
+      const sheet = await createRes.json() as any;
+      cachedSpreadsheetId = sheet.spreadsheetId;
+    }
+
+    const spreadsheetId = cachedSpreadsheetId!;
+
+    // Clear the sheet first
+    await connectors.proxy("google-sheet", `/v4/spreadsheets/${spreadsheetId}/values/Leads:clear`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    // Write headers + all rows
+    const values = [headers, ...rows];
+    await connectors.proxy("google-sheet", `/v4/spreadsheets/${spreadsheetId}/values/Leads!A1:append?valueInputOption=RAW&insertDataOption=OVERWRITE`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values }),
+    });
+
+    // Bold the header row and set column widths
+    await connectors.proxy("google-sheet", `/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requests: [
+          {
+            repeatCell: {
+              range: { sheetId: 0, startRowIndex: 0, endRowIndex: 1 },
+              cell: {
+                userEnteredFormat: {
+                  textFormat: { bold: true },
+                  backgroundColor: { red: 0.13, green: 0.17, blue: 0.29 },
+                  horizontalAlignment: "CENTER",
+                },
+              },
+              fields: "userEnteredFormat(textFormat,backgroundColor,horizontalAlignment)",
+            },
+          },
+          {
+            autoResizeDimensions: {
+              dimensions: { sheetId: 0, dimension: "COLUMNS", startIndex: 0, endIndex: headers.length },
+            },
+          },
+          {
+            updateSheetProperties: {
+              properties: { sheetId: 0, gridProperties: { frozenRowCount: 1 } },
+              fields: "gridProperties.frozenRowCount",
+            },
+          },
+        ],
+      }),
+    });
+
+    const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
+    res.json({ success: true, spreadsheetId, url: sheetUrl, rowCount: rows.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Sheets sync failed" });
+  }
+});
+
+// GET /admin/sheets/info — returns the current sheet URL if it exists
+router.get("/admin/sheets/info", authMiddleware, async (_req, res) => {
+  if (!cachedSpreadsheetId) {
+    res.json({ exists: false });
+    return;
+  }
+  res.json({
+    exists: true,
+    url: `https://docs.google.com/spreadsheets/d/${cachedSpreadsheetId}`,
+    spreadsheetId: cachedSpreadsheetId,
   });
 });
 

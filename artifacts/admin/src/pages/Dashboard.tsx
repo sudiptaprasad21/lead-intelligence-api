@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   LogOut, Users, Flame, Zap, TrendingUp, Snowflake,
-  RefreshCw, Search, TrendingDown, BarChart3, Building2
+  RefreshCw, Search, BarChart3, Building2, Sheet, ExternalLink
 } from "lucide-react";
 
 const SEGMENT_COLORS: Record<string, string> = {
@@ -89,6 +89,9 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [segFilter, setSegFilter] = useState("all");
   const [stats, setStats] = useState<Stats | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
+  const [sheetUrl, setSheetUrl] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
 
   const { data: leads = [], isLoading, refetch, isFetching } = useListLeads();
 
@@ -102,7 +105,34 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     }
   }
 
-  useEffect(() => { loadStats(); }, []);
+  useEffect(() => {
+    loadStats();
+    // Check if a sheet already exists for this session
+    adminFetch("/admin/sheets/info")
+      .then(r => r.json())
+      .then((d: any) => { if (d.exists) setSheetUrl(d.url); })
+      .catch(() => {});
+  }, []);
+
+  async function handleSyncSheets() {
+    setSyncing(true);
+    setSyncMsg("");
+    try {
+      const res = await adminFetch("/admin/sheets/sync", { method: "POST" });
+      const data = await res.json() as any;
+      if (res.ok) {
+        setSheetUrl(data.url);
+        setSyncMsg(`Synced ${data.rowCount} lead${data.rowCount !== 1 ? "s" : ""} to Google Sheets`);
+      } else {
+        setSyncMsg(data.error ?? "Sync failed");
+      }
+    } catch {
+      setSyncMsg("Network error — sync failed");
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMsg(""), 6000);
+    }
+  }
 
   function handleRefresh() {
     refetch();
@@ -144,7 +174,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     <div className="min-h-screen bg-background">
       {/* Top bar */}
       <header className="border-b border-border bg-card/50 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-[1400px] mx-auto px-6 h-14 flex items-center justify-between">
+        <div className="max-w-[1400px] mx-auto px-6 h-14 flex items-center justify-between relative">
           <div className="flex items-center gap-3">
             <div className="flex items-center justify-center w-7 h-7 rounded-md bg-primary/20 border border-primary/30">
               <BarChart3 className="w-4 h-4 text-primary" />
@@ -152,8 +182,33 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
             <span className="font-semibold text-sm">Nexpoint Admin</span>
             <span className="text-muted-foreground text-xs hidden sm:block">· Lead Intelligence Dashboard</span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground hidden sm:block">Signed in as <strong>{username}</strong></span>
+            {sheetUrl && (
+              <a
+                href={sheetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-500/15 text-green-400 border border-green-500/25 hover:bg-green-500/25 transition-colors"
+              >
+                <Sheet className="w-3.5 h-3.5" />
+                Open Sheet
+                <ExternalLink className="w-3 h-3 opacity-60" />
+              </a>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSyncSheets}
+              disabled={syncing}
+              className="text-xs h-8 border-green-500/30 text-green-400 hover:bg-green-500/10 hover:text-green-300"
+            >
+              {syncing ? (
+                <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Syncing…</>
+              ) : (
+                <><Sheet className="w-3.5 h-3.5 mr-1.5" /> Sync to Sheets</>
+              )}
+            </Button>
             <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={isFetching || statsLoading}>
               <RefreshCw className={`w-4 h-4 ${isFetching || statsLoading ? "animate-spin" : ""}`} />
             </Button>
@@ -161,6 +216,11 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               <LogOut className="w-4 h-4 mr-1.5" /> Sign out
             </Button>
           </div>
+          {syncMsg && (
+            <div className={`absolute top-14 right-6 text-xs px-3 py-2 rounded-lg border shadow-lg ${syncMsg.includes("failed") || syncMsg.includes("error") ? "bg-destructive/20 text-destructive border-destructive/30" : "bg-green-500/15 text-green-400 border-green-500/25"}`}>
+              {syncMsg}
+            </div>
+          )}
         </div>
       </header>
 
