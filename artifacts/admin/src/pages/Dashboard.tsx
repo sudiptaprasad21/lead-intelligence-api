@@ -543,6 +543,132 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           ))}
         </div>
 
+        {/* ── Lead Insights ─────────────────────────────────────── */}
+        <Card className="border-card-border">
+          <CardHeader className="pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <BrainCircuit className="w-4 h-4 text-violet-400" />
+                  Lead Insights
+                </CardTitle>
+                <CardDescription className="text-xs mt-1">
+                  AI-generated executive intelligence — actionable, period-specific, and board-ready
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Tabs
+              defaultValue="weekly"
+              onValueChange={(period) => { setActiveInsightPeriod(period as any); loadInsights(period); }}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <TabsList className="bg-muted/50 border border-border/50">
+                  <TabsTrigger value="daily"   className="text-xs px-4">Daily</TabsTrigger>
+                  <TabsTrigger value="weekly"  className="text-xs px-4">Weekly</TabsTrigger>
+                  <TabsTrigger value="monthly" className="text-xs px-4">Monthly</TabsTrigger>
+                </TabsList>
+              </div>
+
+              {(["daily", "weekly", "monthly"] as const).map(period => (
+                <TabsContent key={period} value={period}>
+                  <div ref={period === activeInsightPeriod ? insightsRef : undefined} className="space-y-4">
+                    {insightsLoading[period] ? (
+                      <div className="flex items-center gap-3 py-10 justify-center text-muted-foreground">
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span className="text-sm">Generating AI insights…</span>
+                      </div>
+                    ) : insights[period] ? (
+                      <>
+                        {/* Summary bar */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-2">
+                          {[
+                            { label: "New Leads", value: insights[period].summary.newLeads, color: "text-primary" },
+                            { label: "Hot (SQL)", value: insights[period].summary.hot, color: "text-red-400" },
+                            { label: "Warm (MQL)", value: insights[period].summary.warm, color: "text-orange-400" },
+                            { label: "Avg Score", value: `${insights[period].summary.avgScore}/100`, color: "text-green-400" },
+                            { label: "Delivered", value: insights[period].summary.deliveredActions, color: "text-emerald-400" },
+                            { label: "Failed", value: insights[period].summary.failedActions, color: insights[period].summary.failedActions > 0 ? "text-red-400" : "text-muted-foreground" },
+                          ].map(({ label, value, color }) => (
+                            <div key={label} className="bg-muted/30 rounded-lg px-3 py-2.5 border border-border/50">
+                              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
+                              <p className={`text-base font-bold mt-0.5 ${color}`}>{value}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* AI bullets */}
+                        <div className="bg-gradient-to-br from-violet-500/5 to-blue-500/5 border border-violet-500/20 rounded-xl p-5 space-y-3">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                            <span className="text-xs font-semibold text-violet-300 uppercase tracking-wider">AI Analysis — {insights[period].periodLabel}</span>
+                          </div>
+                          <ul className="space-y-3">
+                            {insights[period].bullets.map((bullet, i) => (
+                              <li key={i} className="flex gap-3 text-sm text-foreground leading-relaxed">
+                                <span className="mt-0.5 w-5 h-5 rounded-full bg-violet-500/20 border border-violet-500/30 flex items-center justify-center text-[10px] font-bold text-violet-400 shrink-0">
+                                  {i + 1}
+                                </span>
+                                <span>{bullet}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        {/* Footer: generated at + actions */}
+                        <div className="flex items-center justify-between pt-1">
+                          <p className="text-[10px] text-muted-foreground">
+                            Generated {new Date(insights[period].generatedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => refreshInsights(period)}
+                              className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                            >
+                              <RefreshCw className="w-3 h-3 mr-1.5" /> Refresh
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => downloadInsightsPDF(period)}
+                              disabled={pdfingInsights}
+                              className="h-7 text-xs border-violet-500/30 text-violet-400 hover:bg-violet-500/10"
+                            >
+                              {pdfingInsights
+                                ? <><RefreshCw className="w-3 h-3 mr-1.5 animate-spin" /> Generating…</>
+                                : <><FileText className="w-3 h-3 mr-1.5" /> Download PDF</>}
+                            </Button>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                        <div className="w-12 h-12 rounded-full bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
+                          <BrainCircuit className="w-6 h-6 text-violet-400" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">No insights loaded yet</p>
+                          <p className="text-xs text-muted-foreground mt-1">Click below to generate AI-powered intelligence for the {period} period</p>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => loadInsights(period)}
+                          className="bg-violet-600 hover:bg-violet-700 text-white text-xs mt-1"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Generate {period.charAt(0).toUpperCase() + period.slice(1)} Insights
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+              ))}
+            </Tabs>
+          </CardContent>
+        </Card>
+
         {/* Secondary metrics */}
         {displayStats && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1163,133 +1289,6 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               <span>Showing {filtered.length} lead{filtered.length !== 1 ? "s" : ""}</span>
               <span>Last refreshed: {new Date().toLocaleTimeString()}</span>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* ── Lead Insights ─────────────────────────────────────── */}
-        <Card className="border-card-border">
-          <CardHeader className="pb-3">
-            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-              <div>
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <BrainCircuit className="w-4 h-4 text-violet-400" />
-                  Lead Insights
-                </CardTitle>
-                <CardDescription className="text-xs mt-1">
-                  AI-generated executive intelligence — actionable, period-specific, and board-ready
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <Tabs
-              defaultValue="weekly"
-              onValueChange={(period) => { setActiveInsightPeriod(period as any); loadInsights(period); }}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <TabsList className="bg-muted/50 border border-border/50">
-                  <TabsTrigger value="daily"   className="text-xs px-4">Daily</TabsTrigger>
-                  <TabsTrigger value="weekly"  className="text-xs px-4">Weekly</TabsTrigger>
-                  <TabsTrigger value="monthly" className="text-xs px-4">Monthly</TabsTrigger>
-                </TabsList>
-              </div>
-
-              {(["daily", "weekly", "monthly"] as const).map(period => (
-                <TabsContent key={period} value={period}>
-                  {/* Insights card — ref tracks active tab for PDF download */}
-                  <div ref={period === activeInsightPeriod ? insightsRef : undefined} className="space-y-4">
-                    {insightsLoading[period] ? (
-                      <div className="flex items-center gap-3 py-10 justify-center text-muted-foreground">
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span className="text-sm">Generating AI insights…</span>
-                      </div>
-                    ) : insights[period] ? (
-                      <>
-                        {/* Summary bar */}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-2">
-                          {[
-                            { label: "New Leads", value: insights[period].summary.newLeads, color: "text-primary" },
-                            { label: "Hot (SQL)", value: insights[period].summary.hot, color: "text-red-400" },
-                            { label: "Warm (MQL)", value: insights[period].summary.warm, color: "text-orange-400" },
-                            { label: "Avg Score", value: `${insights[period].summary.avgScore}/100`, color: "text-green-400" },
-                            { label: "Delivered", value: insights[period].summary.deliveredActions, color: "text-emerald-400" },
-                            { label: "Failed", value: insights[period].summary.failedActions, color: insights[period].summary.failedActions > 0 ? "text-red-400" : "text-muted-foreground" },
-                          ].map(({ label, value, color }) => (
-                            <div key={label} className="bg-muted/30 rounded-lg px-3 py-2.5 border border-border/50">
-                              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
-                              <p className={`text-base font-bold mt-0.5 ${color}`}>{value}</p>
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* AI bullets */}
-                        <div className="bg-gradient-to-br from-violet-500/5 to-blue-500/5 border border-violet-500/20 rounded-xl p-5 space-y-3">
-                          <div className="flex items-center gap-2 mb-1">
-                            <Sparkles className="w-3.5 h-3.5 text-violet-400" />
-                            <span className="text-xs font-semibold text-violet-300 uppercase tracking-wider">AI Analysis — {insights[period].periodLabel}</span>
-                          </div>
-                          <ul className="space-y-3">
-                            {insights[period].bullets.map((bullet, i) => (
-                              <li key={i} className="flex gap-3 text-sm text-foreground leading-relaxed">
-                                <span className="mt-0.5 w-5 h-5 rounded-full bg-violet-500/20 border border-violet-500/30 flex items-center justify-center text-[10px] font-bold text-violet-400 shrink-0">
-                                  {i + 1}
-                                </span>
-                                <span>{bullet}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-
-                        {/* Footer: generated at + actions */}
-                        <div className="flex items-center justify-between pt-1">
-                          <p className="text-[10px] text-muted-foreground">
-                            Generated {new Date(insights[period].generatedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => refreshInsights(period)}
-                              className="h-7 text-xs text-muted-foreground hover:text-foreground"
-                            >
-                              <RefreshCw className="w-3 h-3 mr-1.5" /> Refresh
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => downloadInsightsPDF(period)}
-                              disabled={pdfingInsights}
-                              className="h-7 text-xs border-violet-500/30 text-violet-400 hover:bg-violet-500/10"
-                            >
-                              {pdfingInsights
-                                ? <><RefreshCw className="w-3 h-3 mr-1.5 animate-spin" /> Generating…</>
-                                : <><FileText className="w-3 h-3 mr-1.5" /> Download PDF</>}
-                            </Button>
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
-                        <div className="w-12 h-12 rounded-full bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
-                          <BrainCircuit className="w-6 h-6 text-violet-400" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium">No insights loaded yet</p>
-                          <p className="text-xs text-muted-foreground mt-1">Click below to generate AI-powered intelligence for the {period} period</p>
-                        </div>
-                        <Button
-                          size="sm"
-                          onClick={() => loadInsights(period)}
-                          className="bg-violet-600 hover:bg-violet-700 text-white text-xs mt-1"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Generate {period.charAt(0).toUpperCase() + period.slice(1)} Insights
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </TabsContent>
-              ))}
-            </Tabs>
           </CardContent>
         </Card>
 
