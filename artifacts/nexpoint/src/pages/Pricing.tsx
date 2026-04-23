@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { useLeadCapture } from "@/hooks/use-lead-capture";
 
 const trialSchema = z.object({
   fullName: z.string().min(2, "Name is required"),
@@ -25,6 +26,7 @@ export default function Pricing() {
   const [isAnnual, setIsAnnual] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const { toast } = useToast();
+  const { captureLead, isLoading } = useLeadCapture();
 
   const form = useForm<z.infer<typeof trialSchema>>({
     resolver: zodResolver(trialSchema),
@@ -36,13 +38,29 @@ export default function Pricing() {
     form.setValue("plan", planName);
   };
 
-  const onSubmit = (data: z.infer<typeof trialSchema>) => {
-    toast({
-      title: "Trial Activated!",
-      description: `Your 14-day free trial for the ${data.plan} plan has started. Check your email.`,
-    });
-    setSelectedPlan(null);
-    form.reset();
+  const onSubmit = async (data: z.infer<typeof trialSchema>) => {
+    try {
+      await captureLead(
+        {
+          email: data.email,
+          full_name: data.fullName,
+          company_name: data.company,
+          form_type: "free_trial",
+          campaign: `pricing_${data.plan.toLowerCase()}_trial`,
+          source: "direct",
+        },
+        "trial_form_submitted",
+        { plan: data.plan, billing: isAnnual ? "annual" : "monthly" }
+      );
+      toast({
+        title: "Trial Activated!",
+        description: `Your 14-day free trial for the ${data.plan} plan has started. Check your email.`,
+      });
+      setSelectedPlan(null);
+      form.reset();
+    } catch {
+      toast({ title: "Something went wrong", description: "Please try again.", variant: "destructive" });
+    }
   };
 
   return (
@@ -62,15 +80,27 @@ export default function Pricing() {
             </p>
 
             <div className="flex items-center justify-center gap-4 text-lg">
-              <Label htmlFor="billing-toggle" className={`cursor-pointer ${!isAnnual ? 'font-bold text-foreground' : 'text-muted-foreground'}`}>Monthly</Label>
-              <Switch 
-                id="billing-toggle" 
-                checked={isAnnual} 
-                onCheckedChange={setIsAnnual} 
+              <Label
+                htmlFor="billing-toggle"
+                className={`cursor-pointer ${!isAnnual ? "font-bold text-foreground" : "text-muted-foreground"}`}
+              >
+                Monthly
+              </Label>
+              <Switch
+                id="billing-toggle"
+                checked={isAnnual}
+                onCheckedChange={setIsAnnual}
                 className="scale-125 data-[state=checked]:bg-primary"
+                data-testid="switch-billing-toggle"
               />
-              <Label htmlFor="billing-toggle" className={`cursor-pointer flex items-center gap-2 ${isAnnual ? 'font-bold text-foreground' : 'text-muted-foreground'}`}>
-                Annually <span className="text-xs font-bold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-2 py-1 rounded-full">Save 20%</span>
+              <Label
+                htmlFor="billing-toggle"
+                className={`cursor-pointer flex items-center gap-2 ${isAnnual ? "font-bold text-foreground" : "text-muted-foreground"}`}
+              >
+                Annually{" "}
+                <span className="text-xs font-bold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-2 py-1 rounded-full">
+                  Save 20%
+                </span>
               </Label>
             </div>
           </motion.div>
@@ -80,27 +110,19 @@ export default function Pricing() {
       {/* Pricing Cards */}
       <section className="pt-20 px-4 container mx-auto max-w-6xl">
         <div className="grid md:grid-cols-3 gap-8 items-stretch">
-          
+
           {/* Trial Card */}
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}>
             <Card className="h-full flex flex-col relative overflow-hidden bg-background">
               <CardHeader className="pb-8">
                 <CardTitle className="text-2xl mb-2">Trial (Free)</CardTitle>
-                <div className="flex items-baseline text-5xl font-extrabold">
-                  $0
-                </div>
+                <div className="flex items-baseline text-5xl font-extrabold">$0</div>
                 <CardDescription className="text-base mt-2">/ 14 days</CardDescription>
                 <p className="text-sm text-muted-foreground mt-4 font-medium">No credit card required.</p>
               </CardHeader>
               <CardContent className="flex-grow">
                 <ul className="space-y-4 text-sm">
-                  {[
-                    "All Starter features",
-                    "1 user",
-                    "Up to 500 contacts",
-                    "14-day access",
-                    "Basic analytics"
-                  ].map((feature, i) => (
+                  {["All Starter features", "1 user", "Up to 500 contacts", "14-day access", "Basic analytics"].map((feature, i) => (
                     <li key={i} className="flex items-center gap-3">
                       <Check className="h-5 w-5 text-primary flex-shrink-0" /> {feature}
                     </li>
@@ -108,10 +130,17 @@ export default function Pricing() {
                 </ul>
               </CardContent>
               <CardFooter className="flex flex-col gap-4 pt-8">
-                <Button className="w-full py-6 text-lg" variant="outline" onClick={() => handleOpenModal("Trial")}>
+                <Button
+                  className="w-full py-6 text-lg"
+                  variant="outline"
+                  onClick={() => handleOpenModal("Trial")}
+                  data-testid="button-trial-plan"
+                >
                   Start Free Trial
                 </Button>
-                <p className="text-xs text-muted-foreground text-center font-medium uppercase tracking-wide">Experience it for 14 Days FREE</p>
+                <p className="text-xs text-muted-foreground text-center font-medium uppercase tracking-wide">
+                  Experience it for 14 Days FREE
+                </p>
               </CardFooter>
             </Card>
           </motion.div>
@@ -121,24 +150,13 @@ export default function Pricing() {
             <Card className="h-full flex flex-col relative overflow-hidden bg-background">
               <CardHeader className="pb-8">
                 <CardTitle className="text-2xl mb-2">Starter</CardTitle>
-                <div className="flex items-baseline text-5xl font-extrabold">
-                  ${isAnnual ? "71" : "89"}
-                </div>
+                <div className="flex items-baseline text-5xl font-extrabold">${isAnnual ? "71" : "89"}</div>
                 <CardDescription className="text-base mt-2">/ month {isAnnual && "(billed annually)"}</CardDescription>
                 <p className="text-sm text-muted-foreground mt-4 font-medium">Perfect for growing marketing teams.</p>
               </CardHeader>
               <CardContent className="flex-grow">
                 <ul className="space-y-4 text-sm">
-                  {[
-                    "3 Sub-Accounts",
-                    "Unlimited Contacts",
-                    "Unlimited Users",
-                    "24/7 Support",
-                    "All Core Features",
-                    "Content AI",
-                    "Campaign Manager",
-                    "SEO Tools"
-                  ].map((feature, i) => (
+                  {["3 Sub-Accounts", "Unlimited Contacts", "Unlimited Users", "24/7 Support", "All Core Features", "Content AI", "Campaign Manager", "SEO Tools"].map((feature, i) => (
                     <li key={i} className="flex items-center gap-3">
                       <Check className="h-5 w-5 text-primary flex-shrink-0" /> {feature}
                     </li>
@@ -146,51 +164,60 @@ export default function Pricing() {
                 </ul>
               </CardContent>
               <CardFooter className="flex flex-col gap-4 pt-8">
-                <Button className="w-full py-6 text-lg" variant="outline" onClick={() => handleOpenModal("Starter")}>
+                <Button
+                  className="w-full py-6 text-lg"
+                  variant="outline"
+                  onClick={() => handleOpenModal("Starter")}
+                  data-testid="button-starter-plan"
+                >
                   Start Your Trial
                 </Button>
-                <p className="text-xs text-muted-foreground text-center font-medium uppercase tracking-wide">Experience it for 14 Days FREE</p>
+                <p className="text-xs text-muted-foreground text-center font-medium uppercase tracking-wide">
+                  Experience it for 14 Days FREE
+                </p>
               </CardFooter>
             </Card>
           </motion.div>
 
           {/* Unlimited Card */}
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.3 }} className="relative z-10 md:-mt-4 md:-mb-4">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.3 }}
+            className="relative z-10 md:-mt-4 md:-mb-4"
+          >
             <Card className="h-full flex flex-col relative overflow-hidden bg-slate-900 text-slate-50 border-primary shadow-2xl shadow-primary/20">
               <div className="absolute top-0 inset-x-0 bg-primary text-primary-foreground text-center text-sm font-bold py-1.5 uppercase tracking-wider">
                 Most Popular
               </div>
               <CardHeader className="pb-8 pt-10">
                 <CardTitle className="text-2xl mb-2">Unlimited</CardTitle>
-                <div className="flex items-baseline text-5xl font-extrabold text-white">
-                  ${isAnnual ? "199" : "249"}
-                </div>
+                <div className="flex items-baseline text-5xl font-extrabold text-white">${isAnnual ? "199" : "249"}</div>
                 <CardDescription className="text-base mt-2 text-slate-400">/ month {isAnnual && "(billed annually)"}</CardDescription>
                 <p className="text-sm text-slate-300 mt-4 font-medium">Built for agencies and enterprises.</p>
               </CardHeader>
               <CardContent className="flex-grow">
                 <ul className="space-y-4 text-sm text-slate-200">
-                  {[
-                    "Everything in Starter",
-                    "Unlimited Sub-Accounts",
-                    "User/Agent Reporting",
-                    "Phone and Email (no markup)",
-                    "Advanced API Access",
-                    "Priority Support",
-                    "White-label options",
-                    "Custom Integrations"
-                  ].map((feature, i) => (
-                    <li key={i} className="flex items-center gap-3">
-                      <Check className="h-5 w-5 text-cyan-400 flex-shrink-0" /> {feature}
-                    </li>
-                  ))}
+                  {["Everything in Starter", "Unlimited Sub-Accounts", "User/Agent Reporting", "Phone and Email (no markup)", "Advanced API Access", "Priority Support", "White-label options", "Custom Integrations"].map(
+                    (feature, i) => (
+                      <li key={i} className="flex items-center gap-3">
+                        <Check className="h-5 w-5 text-cyan-400 flex-shrink-0" /> {feature}
+                      </li>
+                    )
+                  )}
                 </ul>
               </CardContent>
               <CardFooter className="flex flex-col gap-4 pt-8">
-                <Button className="w-full py-6 text-lg bg-white text-slate-900 hover:bg-slate-200 border-none" onClick={() => handleOpenModal("Unlimited")}>
+                <Button
+                  className="w-full py-6 text-lg bg-white text-slate-900 hover:bg-slate-200 border-none"
+                  onClick={() => handleOpenModal("Unlimited")}
+                  data-testid="button-unlimited-plan"
+                >
                   Start Your Trial
                 </Button>
-                <p className="text-xs text-slate-400 text-center font-medium uppercase tracking-wide">Experience it for 14 Days FREE</p>
+                <p className="text-xs text-slate-400 text-center font-medium uppercase tracking-wide">
+                  Experience it for 14 Days FREE
+                </p>
               </CardFooter>
             </Card>
           </motion.div>
@@ -204,26 +231,62 @@ export default function Pricing() {
           <DialogHeader>
             <DialogTitle>Activate Your Trial</DialogTitle>
             <DialogDescription>
-              Enter your details to start your 14-day free trial of the <strong className="text-foreground">{selectedPlan}</strong> plan.
+              Enter your details to start your 14-day free trial of the{" "}
+              <strong className="text-foreground">{selectedPlan}</strong> plan.
             </DialogDescription>
           </DialogHeader>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4">
-              <FormField control={form.control} name="plan" render={({ field }) => (
-                <FormItem className="hidden">
-                  <FormControl><Input {...field} /></FormControl>
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="fullName" render={({ field }) => (
-                <FormItem><FormLabel>Full Name</FormLabel><FormControl><Input placeholder="Jane Doe" {...field} /></FormControl><FormMessage /></FormItem>
-              )} />
-              <FormField control={form.control} name="email" render={({ field }) => (
-                <FormItem><FormLabel>Business Email</FormLabel><FormControl><Input type="email" placeholder="jane@company.com" {...field} /></FormControl><FormMessage /></FormItem>
-              )} />
-              <FormField control={form.control} name="company" render={({ field }) => (
-                <FormItem><FormLabel>Company</FormLabel><FormControl><Input placeholder="Acme Corp" {...field} /></FormControl><FormMessage /></FormItem>
-              )} />
-              <Button type="submit" className="w-full mt-6">Activate My Trial</Button>
+              <FormField
+                control={form.control}
+                name="plan"
+                render={({ field }) => (
+                  <FormItem className="hidden">
+                    <FormControl><Input {...field} /></FormControl>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="fullName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Full Name</FormLabel>
+                    <FormControl><Input data-testid="input-modal-name" placeholder="Jane Doe" {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Business Email</FormLabel>
+                    <FormControl><Input data-testid="input-modal-email" type="email" placeholder="jane@company.com" {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="company"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Company</FormLabel>
+                    <FormControl><Input data-testid="input-modal-company" placeholder="Acme Corp" {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <Button
+                type="submit"
+                className="w-full mt-6"
+                disabled={isLoading}
+                data-testid="button-modal-activate"
+              >
+                {isLoading ? "Activating..." : "Activate My Trial"}
+              </Button>
             </form>
           </Form>
         </DialogContent>

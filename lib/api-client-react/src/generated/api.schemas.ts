@@ -8,3 +8,179 @@
 export interface HealthStatus {
   status: string;
 }
+
+export interface ErrorResponse {
+  error: string;
+}
+
+/**
+ * Number of employees in the company
+ * @nullable
+ */
+export type UpsertLeadBodyCompanySize =
+  | (typeof UpsertLeadBodyCompanySize)[keyof typeof UpsertLeadBodyCompanySize]
+  | null;
+
+export const UpsertLeadBodyCompanySize = {
+  "1-10": "1-10",
+  "11-50": "11-50",
+  "51-200": "51-200",
+  "201-500": "201-500",
+  "500+": "500+",
+} as const;
+
+export interface UpsertLeadBody {
+  /** Business email address (used as unique identifier) */
+  email: string;
+  /**
+   * Full name of the lead
+   * @minLength 1
+   */
+  full_name: string;
+  /**
+   * Company name
+   * @minLength 1
+   */
+  company_name: string;
+  /**
+   * Job title / role
+   * @nullable
+   */
+  job_title?: string | null;
+  /**
+   * Number of employees in the company
+   * @nullable
+   */
+  company_size?: UpsertLeadBodyCompanySize;
+  /**
+   * Industry vertical
+   * @nullable
+   */
+  industry?: string | null;
+  /**
+   * Lead source channel (direct, referral, event, organic, paid, cold_list)
+   * @nullable
+   */
+  source?: string | null;
+  /**
+   * Campaign or form source (e.g. free_trial_form, demo_form, event_registration)
+   * @nullable
+   */
+  campaign?: string | null;
+  /**
+   * Which form was submitted (free_trial, demo_request, event_registration, contact)
+   * @nullable
+   */
+  form_type?: string | null;
+  /**
+   * How the lead heard about Nexpoint (LinkedIn, Google, Referral, etc.)
+   * @nullable
+   */
+  referral_source?: string | null;
+  /**
+   * Lead's stated biggest marketing challenge
+   * @nullable
+   */
+  marketing_challenge?: string | null;
+}
+
+export interface Lead {
+  id: number;
+  email: string;
+  full_name: string;
+  company_name: string;
+  /** @nullable */
+  job_title?: string | null;
+  /** @nullable */
+  company_size?: string | null;
+  /** @nullable */
+  industry?: string | null;
+  /** Always "website_visit" for leads from this landing page */
+  source: string;
+  /**
+   * Channel source (direct, referral, event, organic, paid)
+   * @nullable
+   */
+  lead_source: string | null;
+  /** @nullable */
+  campaign?: string | null;
+  /** @nullable */
+  form_type?: string | null;
+  /** @nullable */
+  referral_source?: string | null;
+  /** @nullable */
+  marketing_challenge?: string | null;
+  intent_score: number;
+  fit_score: number;
+  behavior_score: number;
+  source_score: number;
+  total_score: number;
+  /** hot (SQL), warm (MQL), nurture, or cold */
+  segment: string;
+  /** @nullable */
+  last_activity_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Type of activity
+ */
+export type TrackActivityBodyActivityType =
+  (typeof TrackActivityBodyActivityType)[keyof typeof TrackActivityBodyActivityType];
+
+export const TrackActivityBodyActivityType = {
+  demo_page_visit: "demo_page_visit",
+  pricing_page_visit: "pricing_page_visit",
+  event_page_visit: "event_page_visit",
+  contact_sales_click: "contact_sales_click",
+  demo_form_started: "demo_form_started",
+  demo_form_submitted: "demo_form_submitted",
+  trial_form_submitted: "trial_form_submitted",
+  event_registration_submitted: "event_registration_submitted",
+  whatsapp_click: "whatsapp_click",
+  email_click: "email_click",
+} as const;
+
+/**
+ * Whether the action was just initiated (click/visit) or completed (form submitted)
+ */
+export type TrackActivityBodyStatus =
+  (typeof TrackActivityBodyStatus)[keyof typeof TrackActivityBodyStatus];
+
+export const TrackActivityBodyStatus = {
+  initiated: "initiated",
+  completed: "completed",
+} as const;
+
+/**
+ * Optional additional context for the activity
+ */
+export type TrackActivityBodyMetadata = { [key: string]: unknown };
+
+export interface TrackActivityBody {
+  /** Email of the lead (used to look up the lead record) */
+  email: string;
+  /** Type of activity */
+  activity_type: TrackActivityBodyActivityType;
+  /** Whether the action was just initiated (click/visit) or completed (form submitted) */
+  status: TrackActivityBodyStatus;
+  /** Optional additional context for the activity */
+  metadata?: TrackActivityBodyMetadata;
+}
+
+export type LeadActivityMetadata = { [key: string]: unknown };
+
+export interface LeadActivity {
+  id: number;
+  lead_id: number;
+  activity_type: string;
+  status: string;
+  metadata?: LeadActivityMetadata;
+  created_at: string;
+}
+
+export interface TrackActivityResponse {
+  activity: LeadActivity;
+  lead: Lead;
+}

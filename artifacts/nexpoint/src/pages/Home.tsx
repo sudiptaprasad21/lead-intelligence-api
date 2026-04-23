@@ -1,5 +1,4 @@
 import { motion } from "framer-motion";
-import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +9,7 @@ import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useLeadCapture } from "@/hooks/use-lead-capture";
 
 const trialSchema = z.object({
   fullName: z.string().min(2, "Name is required"),
@@ -92,6 +92,7 @@ const clients = ["TechVentures Inc.", "ScaleUp Solutions", "GlobalEdge Corp", "N
 
 export default function Home() {
   const { toast } = useToast();
+  const { captureLead, isLoading } = useLeadCapture();
 
   const trialForm = useForm<z.infer<typeof trialSchema>>({
     resolver: zodResolver(trialSchema),
@@ -103,14 +104,48 @@ export default function Home() {
     defaultValues: { fullName: "", email: "", company: "", jobTitle: "", date: "", timeSlot: "" },
   });
 
-  const onTrialSubmit = (data: z.infer<typeof trialSchema>) => {
-    toast({ title: "Trial Started!", description: "Check your email for access instructions." });
-    trialForm.reset();
+  const onTrialSubmit = async (data: z.infer<typeof trialSchema>) => {
+    try {
+      await captureLead(
+        {
+          email: data.email,
+          full_name: data.fullName,
+          company_name: data.company,
+          company_size: data.companySize,
+          form_type: "free_trial",
+          campaign: "homepage_trial_form",
+          source: "direct",
+        },
+        "trial_form_submitted",
+        { company_size: data.companySize }
+      );
+      toast({ title: "Trial Started!", description: "Check your email for access instructions." });
+      trialForm.reset();
+    } catch {
+      toast({ title: "Something went wrong", description: "Please try again.", variant: "destructive" });
+    }
   };
 
-  const onDemoSubmit = (data: z.infer<typeof demoSchema>) => {
-    toast({ title: "Demo Requested!", description: "We will contact you shortly to confirm your slot." });
-    demoForm.reset();
+  const onDemoSubmit = async (data: z.infer<typeof demoSchema>) => {
+    try {
+      await captureLead(
+        {
+          email: data.email,
+          full_name: data.fullName,
+          company_name: data.company,
+          job_title: data.jobTitle,
+          form_type: "demo_request",
+          campaign: "homepage_demo_form",
+          source: "direct",
+        },
+        "demo_form_submitted",
+        { preferred_date: data.date, time_slot: data.timeSlot, job_title: data.jobTitle }
+      );
+      toast({ title: "Demo Requested!", description: "We will contact you shortly to confirm your slot." });
+      demoForm.reset();
+    } catch {
+      toast({ title: "Something went wrong", description: "Please try again.", variant: "destructive" });
+    }
   };
 
   const scrollToSection = (id: string) => {
@@ -136,10 +171,21 @@ export default function Home() {
               One Platform. Infinite Possibilities.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Button size="lg" className="h-14 px-8 text-lg w-full sm:w-auto" onClick={() => scrollToSection('trial-form')}>
+              <Button
+                size="lg"
+                className="h-14 px-8 text-lg w-full sm:w-auto"
+                onClick={() => scrollToSection("trial-form")}
+                data-testid="button-hero-trial"
+              >
                 Start Free 14-Day Trial
               </Button>
-              <Button size="lg" variant="outline" className="h-14 px-8 text-lg w-full sm:w-auto" onClick={() => scrollToSection('demo-form')}>
+              <Button
+                size="lg"
+                variant="outline"
+                className="h-14 px-8 text-lg w-full sm:w-auto"
+                onClick={() => scrollToSection("demo-form")}
+                data-testid="button-hero-demo"
+              >
                 Request a Demo
               </Button>
             </div>
@@ -198,7 +244,7 @@ export default function Home() {
             <h2 className="text-4xl font-bold mb-4">Everything you need. Nothing you don't.</h2>
             <p className="text-xl text-muted-foreground">The complete toolkit for modern marketing teams.</p>
           </div>
-          
+
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
             {features.map((feature, i) => (
               <motion.div
@@ -229,7 +275,7 @@ export default function Home() {
       <section className="py-32 px-4 bg-background">
         <div className="container mx-auto max-w-6xl">
           <div className="grid lg:grid-cols-2 gap-16">
-            
+
             {/* Trial Form */}
             <motion.div
               id="trial-form"
@@ -249,19 +295,23 @@ export default function Home() {
                   <Form {...trialForm}>
                     <form onSubmit={trialForm.handleSubmit(onTrialSubmit)} className="space-y-4">
                       <FormField control={trialForm.control} name="fullName" render={({ field }) => (
-                        <FormItem><FormLabel>Full Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                        <FormItem><FormLabel>Full Name</FormLabel><FormControl><Input data-testid="input-trial-name" {...field} /></FormControl><FormMessage /></FormItem>
                       )} />
                       <FormField control={trialForm.control} name="email" render={({ field }) => (
-                        <FormItem><FormLabel>Business Email</FormLabel><FormControl><Input type="email" {...field} /></FormControl><FormMessage /></FormItem>
+                        <FormItem><FormLabel>Business Email</FormLabel><FormControl><Input data-testid="input-trial-email" type="email" {...field} /></FormControl><FormMessage /></FormItem>
                       )} />
                       <FormField control={trialForm.control} name="company" render={({ field }) => (
-                        <FormItem><FormLabel>Company Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                        <FormItem><FormLabel>Company Name</FormLabel><FormControl><Input data-testid="input-trial-company" {...field} /></FormControl><FormMessage /></FormItem>
                       )} />
                       <FormField control={trialForm.control} name="companySize" render={({ field }) => (
                         <FormItem>
                           <FormLabel>Company Size</FormLabel>
                           <Select onValueChange={field.onChange} defaultValue={field.value}>
-                            <FormControl><SelectTrigger><SelectValue placeholder="Select size" /></SelectTrigger></FormControl>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-trial-size">
+                                <SelectValue placeholder="Select size" />
+                              </SelectTrigger>
+                            </FormControl>
                             <SelectContent>
                               <SelectItem value="1-10">1-10</SelectItem>
                               <SelectItem value="11-50">11-50</SelectItem>
@@ -273,7 +323,15 @@ export default function Home() {
                           <FormMessage />
                         </FormItem>
                       )} />
-                      <Button type="submit" className="w-full py-6 mt-4 text-lg">Start Free Trial <ArrowRight className="ml-2 h-5 w-5" /></Button>
+                      <Button
+                        type="submit"
+                        className="w-full py-6 mt-4 text-lg"
+                        disabled={isLoading}
+                        data-testid="button-trial-submit"
+                      >
+                        {isLoading ? "Submitting..." : "Start Free Trial"}
+                        <ArrowRight className="ml-2 h-5 w-5" />
+                      </Button>
                       <p className="text-center text-sm text-muted-foreground mt-4">14 days free, no commitment.</p>
                     </form>
                   </Form>
@@ -300,29 +358,33 @@ export default function Home() {
                     <form onSubmit={demoForm.handleSubmit(onDemoSubmit)} className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
                         <FormField control={demoForm.control} name="fullName" render={({ field }) => (
-                          <FormItem><FormLabel className="text-slate-300">Full Name</FormLabel><FormControl><Input className="bg-slate-800 border-slate-700 text-slate-100" {...field} /></FormControl><FormMessage /></FormItem>
+                          <FormItem><FormLabel className="text-slate-300">Full Name</FormLabel><FormControl><Input data-testid="input-demo-name" className="bg-slate-800 border-slate-700 text-slate-100" {...field} /></FormControl><FormMessage /></FormItem>
                         )} />
                         <FormField control={demoForm.control} name="email" render={({ field }) => (
-                          <FormItem><FormLabel className="text-slate-300">Business Email</FormLabel><FormControl><Input className="bg-slate-800 border-slate-700 text-slate-100" type="email" {...field} /></FormControl><FormMessage /></FormItem>
+                          <FormItem><FormLabel className="text-slate-300">Business Email</FormLabel><FormControl><Input data-testid="input-demo-email" className="bg-slate-800 border-slate-700 text-slate-100" type="email" {...field} /></FormControl><FormMessage /></FormItem>
                         )} />
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <FormField control={demoForm.control} name="company" render={({ field }) => (
-                          <FormItem><FormLabel className="text-slate-300">Company Name</FormLabel><FormControl><Input className="bg-slate-800 border-slate-700 text-slate-100" {...field} /></FormControl><FormMessage /></FormItem>
+                          <FormItem><FormLabel className="text-slate-300">Company Name</FormLabel><FormControl><Input data-testid="input-demo-company" className="bg-slate-800 border-slate-700 text-slate-100" {...field} /></FormControl><FormMessage /></FormItem>
                         )} />
                         <FormField control={demoForm.control} name="jobTitle" render={({ field }) => (
-                          <FormItem><FormLabel className="text-slate-300">Job Title</FormLabel><FormControl><Input className="bg-slate-800 border-slate-700 text-slate-100" {...field} /></FormControl><FormMessage /></FormItem>
+                          <FormItem><FormLabel className="text-slate-300">Job Title</FormLabel><FormControl><Input data-testid="input-demo-jobtitle" className="bg-slate-800 border-slate-700 text-slate-100" {...field} /></FormControl><FormMessage /></FormItem>
                         )} />
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <FormField control={demoForm.control} name="date" render={({ field }) => (
-                          <FormItem><FormLabel className="text-slate-300">Preferred Date</FormLabel><FormControl><Input className="bg-slate-800 border-slate-700 text-slate-100" type="date" {...field} /></FormControl><FormMessage /></FormItem>
+                          <FormItem><FormLabel className="text-slate-300">Preferred Date</FormLabel><FormControl><Input data-testid="input-demo-date" className="bg-slate-800 border-slate-700 text-slate-100" type="date" {...field} /></FormControl><FormMessage /></FormItem>
                         )} />
                         <FormField control={demoForm.control} name="timeSlot" render={({ field }) => (
                           <FormItem>
                             <FormLabel className="text-slate-300">Time Slot</FormLabel>
                             <Select onValueChange={field.onChange} defaultValue={field.value}>
-                              <FormControl><SelectTrigger className="bg-slate-800 border-slate-700 text-slate-100"><SelectValue placeholder="Select time" /></SelectTrigger></FormControl>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-demo-timeslot" className="bg-slate-800 border-slate-700 text-slate-100">
+                                  <SelectValue placeholder="Select time" />
+                                </SelectTrigger>
+                              </FormControl>
                               <SelectContent>
                                 <SelectItem value="9AM EST">9AM EST</SelectItem>
                                 <SelectItem value="11AM EST">11AM EST</SelectItem>
@@ -334,7 +396,15 @@ export default function Home() {
                           </FormItem>
                         )} />
                       </div>
-                      <Button type="submit" variant="secondary" className="w-full py-6 mt-4 text-lg bg-blue-600 hover:bg-blue-700 text-white border-none">Book My Demo</Button>
+                      <Button
+                        type="submit"
+                        variant="secondary"
+                        className="w-full py-6 mt-4 text-lg bg-blue-600 hover:bg-blue-700 text-white border-none"
+                        disabled={isLoading}
+                        data-testid="button-demo-submit"
+                      >
+                        {isLoading ? "Submitting..." : "Book My Demo"}
+                      </Button>
                     </form>
                   </Form>
                 </CardContent>
@@ -351,7 +421,7 @@ export default function Home() {
           <div className="text-center mb-16">
             <h2 className="text-4xl font-bold mb-4">Don't just take our word for it.</h2>
           </div>
-          
+
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {testimonials.map((test, i) => (
               <motion.div
@@ -391,16 +461,24 @@ export default function Home() {
             <p className="text-xl opacity-90 mb-12 max-w-2xl mx-auto">
               Ready to unify your marketing stack? Have questions about our enterprise features? Our team is here to help.
             </p>
-            
+
             <div className="flex flex-col sm:flex-row items-center justify-center gap-8 text-xl">
-              <a href="mailto:hello@nexpoint.ai" className="flex items-center gap-3 hover:opacity-80 transition-opacity bg-white/10 px-8 py-4 rounded-full backdrop-blur-sm">
+              <a
+                href="mailto:hello@nexpoint.ai"
+                className="flex items-center gap-3 hover:opacity-80 transition-opacity bg-white/10 px-8 py-4 rounded-full backdrop-blur-sm"
+                data-testid="link-contact-email"
+              >
                 <Mail className="h-6 w-6" />
                 hello@nexpoint.ai
               </a>
-              <span className="flex items-center gap-3 bg-white/10 px-8 py-4 rounded-full backdrop-blur-sm">
+              <a
+                href="tel:+18006396768"
+                className="flex items-center gap-3 hover:opacity-80 transition-opacity bg-white/10 px-8 py-4 rounded-full backdrop-blur-sm"
+                data-testid="link-contact-phone"
+              >
                 <Phone className="h-6 w-6" />
                 +1 (800) NEX-POINT
-              </span>
+              </a>
             </div>
           </motion.div>
         </div>

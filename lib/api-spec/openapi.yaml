@@ -10,6 +10,10 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: leads
+    description: Lead capture and management
+  - name: activities
+    description: Lead activity tracking
 paths:
   /healthz:
     get:
@@ -24,6 +28,131 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /leads:
+    post:
+      operationId: upsertLead
+      tags: [leads]
+      summary: Create or update a lead
+      description: Creates a new lead or updates an existing lead if the email already exists (upsert). Returns the lead record with updated score.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertLeadBody"
+      responses:
+        "200":
+          description: Lead created or updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lead"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: listLeads
+      tags: [leads]
+      summary: List all leads
+      description: Returns all leads ordered by score descending
+      responses:
+        "200":
+          description: List of leads
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Lead"
+
+  /leads/{id}:
+    get:
+      operationId: getLead
+      tags: [leads]
+      summary: Get a lead by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Lead record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lead"
+        "404":
+          description: Lead not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /activities:
+    post:
+      operationId: trackActivity
+      tags: [activities]
+      summary: Track a lead activity event
+      description: Records a click or form submission event for a lead. Updates the lead score after recording.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrackActivityBody"
+      responses:
+        "200":
+          description: Activity recorded and lead score updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackActivityResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Lead not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /leads/{id}/activities:
+    get:
+      operationId: getLeadActivities
+      tags: [activities]
+      summary: Get all activities for a lead
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of activities for the lead
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LeadActivity"
+        "404":
+          description: Lead not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +163,189 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    UpsertLeadBody:
+      type: object
+      required:
+        - email
+        - full_name
+        - company_name
+      properties:
+        email:
+          type: string
+          format: email
+          description: Business email address (used as unique identifier)
+        full_name:
+          type: string
+          minLength: 1
+          description: Full name of the lead
+        company_name:
+          type: string
+          minLength: 1
+          description: Company name
+        job_title:
+          type: ["string", "null"]
+          description: Job title / role
+        company_size:
+          type: ["string", "null"]
+          enum: ["1-10", "11-50", "51-200", "201-500", "500+", null]
+          description: Number of employees in the company
+        industry:
+          type: ["string", "null"]
+          description: Industry vertical
+        source:
+          type: ["string", "null"]
+          description: Lead source channel (direct, referral, event, organic, paid, cold_list)
+        campaign:
+          type: ["string", "null"]
+          description: Campaign or form source (e.g. free_trial_form, demo_form, event_registration)
+        form_type:
+          type: ["string", "null"]
+          description: Which form was submitted (free_trial, demo_request, event_registration, contact)
+        referral_source:
+          type: ["string", "null"]
+          description: How the lead heard about Nexpoint (LinkedIn, Google, Referral, etc.)
+        marketing_challenge:
+          type: ["string", "null"]
+          description: Lead's stated biggest marketing challenge
+
+    Lead:
+      type: object
+      required:
+        - id
+        - email
+        - full_name
+        - company_name
+        - source
+        - lead_source
+        - intent_score
+        - fit_score
+        - behavior_score
+        - source_score
+        - total_score
+        - segment
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        full_name:
+          type: string
+        company_name:
+          type: string
+        job_title:
+          type: ["string", "null"]
+        company_size:
+          type: ["string", "null"]
+        industry:
+          type: ["string", "null"]
+        source:
+          type: string
+          description: Always "website_visit" for leads from this landing page
+        lead_source:
+          type: ["string", "null"]
+          description: Channel source (direct, referral, event, organic, paid)
+        campaign:
+          type: ["string", "null"]
+        form_type:
+          type: ["string", "null"]
+        referral_source:
+          type: ["string", "null"]
+        marketing_challenge:
+          type: ["string", "null"]
+        intent_score:
+          type: integer
+        fit_score:
+          type: integer
+        behavior_score:
+          type: integer
+        source_score:
+          type: integer
+        total_score:
+          type: integer
+        segment:
+          type: string
+          description: "hot (SQL), warm (MQL), nurture, or cold"
+        last_activity_at:
+          type: ["string", "null"]
+        created_at:
+          type: string
+        updated_at:
+          type: string
+
+    TrackActivityBody:
+      type: object
+      required:
+        - email
+        - activity_type
+        - status
+      properties:
+        email:
+          type: string
+          format: email
+          description: Email of the lead (used to look up the lead record)
+        activity_type:
+          type: string
+          enum:
+            - demo_page_visit
+            - pricing_page_visit
+            - event_page_visit
+            - contact_sales_click
+            - demo_form_started
+            - demo_form_submitted
+            - trial_form_submitted
+            - event_registration_submitted
+            - whatsapp_click
+            - email_click
+          description: Type of activity
+        status:
+          type: string
+          enum: [initiated, completed]
+          description: Whether the action was just initiated (click/visit) or completed (form submitted)
+        metadata:
+          type: object
+          description: Optional additional context for the activity
+          additionalProperties: true
+
+    LeadActivity:
+      type: object
+      required:
+        - id
+        - lead_id
+        - activity_type
+        - status
+        - created_at
+      properties:
+        id:
+          type: integer
+        lead_id:
+          type: integer
+        activity_type:
+          type: string
+        status:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+
+    TrackActivityResponse:
+      type: object
+      required:
+        - activity
+        - lead
+      properties:
+        activity:
+          $ref: "#/components/schemas/LeadActivity"
+        lead:
+          $ref: "#/components/schemas/Lead"

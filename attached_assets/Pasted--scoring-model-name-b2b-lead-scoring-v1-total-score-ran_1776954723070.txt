@@ -1,0 +1,191 @@
+{
+  "scoring_model": {
+    "name": "b2b_lead_scoring_v1",
+    "total_score_range": [0, 100],
+    "formula": {
+      "intent_weight": 40,
+      "fit_weight": 30,
+      "behavior_weight": 20,
+      "source_weight": 10
+    }
+  },
+  "components": {
+    "intent": {
+      "max_score": 40,
+      "cap": 40,
+      "purpose": "Capture immediate buying intent",
+      "rules": [
+        {
+          "signal": "contact_sales_click",
+          "points": 30
+        },
+        {
+          "signal": "demo_page_visit",
+          "points": 25
+        },
+        {
+          "signal": "pricing_page_visit",
+          "points": 20
+        },
+        {
+          "signal": "demo_form_started",
+          "points": 15
+        },
+        {
+          "signal": "high_intent_keyword",
+          "points": 10
+        }
+      ]
+    },
+    "fit": {
+      "max_score": 30,
+      "cap": 30,
+      "purpose": "Ensure sales focus on high-value accounts",
+      "rules": [
+        {
+          "attribute": "company_size",
+          "condition": "50-500",
+          "points": 10
+        },
+        {
+          "attribute": "industry",
+          "condition": "target_segment",
+          "points": 10
+        },
+        {
+          "attribute": "job_role",
+          "condition": "decision_maker",
+          "points": 10
+        },
+        {
+          "attribute": "geography",
+          "condition": "target_market",
+          "points": 5
+        },
+        {
+          "attribute": "non_icp_mismatch",
+          "condition": "true",
+          "points": -10
+        }
+      ]
+    },
+    "behavior": {
+      "max_score": 20,
+      "cap": 20,
+      "purpose": "Measure engagement momentum",
+      "rules": [
+        {
+          "signal": "sessions_last_7_days",
+          "condition": ">=3",
+          "points": 10
+        },
+        {
+          "signal": "time_on_site_minutes",
+          "condition": ">5",
+          "points": 5
+        },
+        {
+          "signal": "content_download",
+          "points": 5
+        },
+        {
+          "signal": "email_open",
+          "points": 3
+        },
+        {
+          "signal": "email_click",
+          "points": 5
+        }
+      ]
+    },
+    "source": {
+      "max_score": 10,
+      "cap": 10,
+      "purpose": "Reflect historical conversion reliability",
+      "rules": [
+        {
+          "source": "direct",
+          "points": 10
+        },
+        {
+          "source": "referral",
+          "points": 8
+        },
+        {
+          "source": "event",
+          "points": 8
+        },
+        {
+          "source": "organic",
+          "points": 7
+        },
+        {
+          "source": "paid",
+          "points": 5
+        },
+        {
+          "source": "cold_list",
+          "points": 2
+        }
+      ]
+    }
+  },
+  "time_decay": {
+    "enabled": true,
+    "rules": [
+      {
+        "condition": "no_activity_days >= 3",
+        "adjustment": -10
+      },
+      {
+        "condition": "no_activity_days >= 7",
+        "adjustment": -20
+      },
+      {
+        "condition": "no_activity_days >= 14",
+        "action": "reset_to_cold"
+      }
+    ],
+    "purpose": "Keep scoring time-sensitive and actionable"
+  },
+  "decision_thresholds": [
+    {
+      "min_score": 80,
+      "max_score": 100,
+      "segment": "hot",
+      "label": "SQL",
+      "action": "immediate_sales_outreach",
+      "sla": "<1_hour"
+    },
+    {
+      "min_score": 60,
+      "max_score": 79,
+      "segment": "warm",
+      "label": "MQL",
+      "action": "sdr_followup_and_nurture"
+    },
+    {
+      "min_score": 40,
+      "max_score": 59,
+      "segment": "nurture",
+      "action": "automated_campaigns"
+    },
+    {
+      "min_score": 0,
+      "max_score": 39,
+      "segment": "cold",
+      "action": "low_priority_drip"
+    }
+  ],
+  "implementation": {
+    "rules": [
+      "enforce_component_caps",
+      "event_driven_updates",
+      "store_raw_signals",
+      "store_component_scores",
+      "store_final_score",
+      "recalculate_on_new_activity",
+      "recalculate_on_time_decay"
+    ]
+  }
+}

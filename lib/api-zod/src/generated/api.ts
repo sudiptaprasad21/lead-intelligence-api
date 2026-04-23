@@ -14,3 +14,253 @@ import * as zod from "zod";
 export const HealthCheckResponse = zod.object({
   status: zod.string(),
 });
+
+/**
+ * Creates a new lead or updates an existing lead if the email already exists (upsert). Returns the lead record with updated score.
+ * @summary Create or update a lead
+ */
+
+export const UpsertLeadBody = zod.object({
+  email: zod
+    .string()
+    .email()
+    .describe("Business email address (used as unique identifier)"),
+  full_name: zod.string().min(1).describe("Full name of the lead"),
+  company_name: zod.string().min(1).describe("Company name"),
+  job_title: zod.string().nullish().describe("Job title \/ role"),
+  company_size: zod
+    .union([
+      zod.literal("1-10"),
+      zod.literal("11-50"),
+      zod.literal("51-200"),
+      zod.literal("201-500"),
+      zod.literal("500+"),
+      zod.literal(null),
+    ])
+    .nullish()
+    .describe("Number of employees in the company"),
+  industry: zod.string().nullish().describe("Industry vertical"),
+  source: zod
+    .string()
+    .nullish()
+    .describe(
+      "Lead source channel (direct, referral, event, organic, paid, cold_list)",
+    ),
+  campaign: zod
+    .string()
+    .nullish()
+    .describe(
+      "Campaign or form source (e.g. free_trial_form, demo_form, event_registration)",
+    ),
+  form_type: zod
+    .string()
+    .nullish()
+    .describe(
+      "Which form was submitted (free_trial, demo_request, event_registration, contact)",
+    ),
+  referral_source: zod
+    .string()
+    .nullish()
+    .describe(
+      "How the lead heard about Nexpoint (LinkedIn, Google, Referral, etc.)",
+    ),
+  marketing_challenge: zod
+    .string()
+    .nullish()
+    .describe("Lead's stated biggest marketing challenge"),
+});
+
+export const UpsertLeadResponse = zod.object({
+  id: zod.number(),
+  email: zod.string(),
+  full_name: zod.string(),
+  company_name: zod.string(),
+  job_title: zod.string().nullish(),
+  company_size: zod.string().nullish(),
+  industry: zod.string().nullish(),
+  source: zod
+    .string()
+    .describe('Always \"website_visit\" for leads from this landing page'),
+  lead_source: zod
+    .string()
+    .nullable()
+    .describe("Channel source (direct, referral, event, organic, paid)"),
+  campaign: zod.string().nullish(),
+  form_type: zod.string().nullish(),
+  referral_source: zod.string().nullish(),
+  marketing_challenge: zod.string().nullish(),
+  intent_score: zod.number(),
+  fit_score: zod.number(),
+  behavior_score: zod.number(),
+  source_score: zod.number(),
+  total_score: zod.number(),
+  segment: zod.string().describe("hot (SQL), warm (MQL), nurture, or cold"),
+  last_activity_at: zod.string().nullish(),
+  created_at: zod.string(),
+  updated_at: zod.string(),
+});
+
+/**
+ * Returns all leads ordered by score descending
+ * @summary List all leads
+ */
+export const ListLeadsResponseItem = zod.object({
+  id: zod.number(),
+  email: zod.string(),
+  full_name: zod.string(),
+  company_name: zod.string(),
+  job_title: zod.string().nullish(),
+  company_size: zod.string().nullish(),
+  industry: zod.string().nullish(),
+  source: zod
+    .string()
+    .describe('Always \"website_visit\" for leads from this landing page'),
+  lead_source: zod
+    .string()
+    .nullable()
+    .describe("Channel source (direct, referral, event, organic, paid)"),
+  campaign: zod.string().nullish(),
+  form_type: zod.string().nullish(),
+  referral_source: zod.string().nullish(),
+  marketing_challenge: zod.string().nullish(),
+  intent_score: zod.number(),
+  fit_score: zod.number(),
+  behavior_score: zod.number(),
+  source_score: zod.number(),
+  total_score: zod.number(),
+  segment: zod.string().describe("hot (SQL), warm (MQL), nurture, or cold"),
+  last_activity_at: zod.string().nullish(),
+  created_at: zod.string(),
+  updated_at: zod.string(),
+});
+export const ListLeadsResponse = zod.array(ListLeadsResponseItem);
+
+/**
+ * @summary Get a lead by ID
+ */
+export const GetLeadParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetLeadResponse = zod.object({
+  id: zod.number(),
+  email: zod.string(),
+  full_name: zod.string(),
+  company_name: zod.string(),
+  job_title: zod.string().nullish(),
+  company_size: zod.string().nullish(),
+  industry: zod.string().nullish(),
+  source: zod
+    .string()
+    .describe('Always \"website_visit\" for leads from this landing page'),
+  lead_source: zod
+    .string()
+    .nullable()
+    .describe("Channel source (direct, referral, event, organic, paid)"),
+  campaign: zod.string().nullish(),
+  form_type: zod.string().nullish(),
+  referral_source: zod.string().nullish(),
+  marketing_challenge: zod.string().nullish(),
+  intent_score: zod.number(),
+  fit_score: zod.number(),
+  behavior_score: zod.number(),
+  source_score: zod.number(),
+  total_score: zod.number(),
+  segment: zod.string().describe("hot (SQL), warm (MQL), nurture, or cold"),
+  last_activity_at: zod.string().nullish(),
+  created_at: zod.string(),
+  updated_at: zod.string(),
+});
+
+/**
+ * Records a click or form submission event for a lead. Updates the lead score after recording.
+ * @summary Track a lead activity event
+ */
+export const TrackActivityBody = zod.object({
+  email: zod
+    .string()
+    .email()
+    .describe("Email of the lead (used to look up the lead record)"),
+  activity_type: zod
+    .enum([
+      "demo_page_visit",
+      "pricing_page_visit",
+      "event_page_visit",
+      "contact_sales_click",
+      "demo_form_started",
+      "demo_form_submitted",
+      "trial_form_submitted",
+      "event_registration_submitted",
+      "whatsapp_click",
+      "email_click",
+    ])
+    .describe("Type of activity"),
+  status: zod
+    .enum(["initiated", "completed"])
+    .describe(
+      "Whether the action was just initiated (click\/visit) or completed (form submitted)",
+    ),
+  metadata: zod
+    .record(zod.string(), zod.unknown())
+    .optional()
+    .describe("Optional additional context for the activity"),
+});
+
+export const TrackActivityResponse = zod.object({
+  activity: zod.object({
+    id: zod.number(),
+    lead_id: zod.number(),
+    activity_type: zod.string(),
+    status: zod.string(),
+    metadata: zod.record(zod.string(), zod.unknown()).optional(),
+    created_at: zod.string(),
+  }),
+  lead: zod.object({
+    id: zod.number(),
+    email: zod.string(),
+    full_name: zod.string(),
+    company_name: zod.string(),
+    job_title: zod.string().nullish(),
+    company_size: zod.string().nullish(),
+    industry: zod.string().nullish(),
+    source: zod
+      .string()
+      .describe('Always \"website_visit\" for leads from this landing page'),
+    lead_source: zod
+      .string()
+      .nullable()
+      .describe("Channel source (direct, referral, event, organic, paid)"),
+    campaign: zod.string().nullish(),
+    form_type: zod.string().nullish(),
+    referral_source: zod.string().nullish(),
+    marketing_challenge: zod.string().nullish(),
+    intent_score: zod.number(),
+    fit_score: zod.number(),
+    behavior_score: zod.number(),
+    source_score: zod.number(),
+    total_score: zod.number(),
+    segment: zod.string().describe("hot (SQL), warm (MQL), nurture, or cold"),
+    last_activity_at: zod.string().nullish(),
+    created_at: zod.string(),
+    updated_at: zod.string(),
+  }),
+});
+
+/**
+ * @summary Get all activities for a lead
+ */
+export const GetLeadActivitiesParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetLeadActivitiesResponseItem = zod.object({
+  id: zod.number(),
+  lead_id: zod.number(),
+  activity_type: zod.string(),
+  status: zod.string(),
+  metadata: zod.record(zod.string(), zod.unknown()).optional(),
+  created_at: zod.string(),
+});
+export const GetLeadActivitiesResponse = zod.array(
+  GetLeadActivitiesResponseItem,
+);
