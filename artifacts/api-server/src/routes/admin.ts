@@ -37,9 +37,11 @@ const ACTION_LABELS: Record<string, string> = {
   periodic_reeval:      "Re-Evaluation",
 };
 
-// The user's existing Google Workbook to write the Workflow Health sheet into
+// Single shared workbook — both the Leads tab and the Workflow Health tab live here
 const WORKFLOW_SHEET_ID = "1mE5u20YienuuUYiihyLIrKiQT0oTtt0TwJCpX3YGLe0";
-const WORKFLOW_TAB_NAME = "Workflow Health";
+const WORKBOOK_URL       = `https://docs.google.com/spreadsheets/d/${WORKFLOW_SHEET_ID}`;
+const WORKFLOW_TAB_NAME  = "Workflow Health";
+const LEADS_TAB_NAME     = "Leads";
 
 const router = Router();
 
@@ -153,9 +155,6 @@ router.get("/admin/stats", authMiddleware, async (_req, res) => {
   });
 });
 
-// Store spreadsheet ID in memory (persists for lifetime of the server process)
-let cachedSpreadsheetId: string | null = null;
-
 function ctaLabel(formType: string | null | undefined, campaign: string | null | undefined): string {
   if (campaign?.startsWith("pricing_")) return "Pricing Modal";
   if (campaign?.includes("homepage_trial")) return "Trial Form";
@@ -167,10 +166,8 @@ function ctaLabel(formType: string | null | undefined, campaign: string | null |
   return formType ?? "—";
 }
 
-// POST /admin/sheets/sync — creates or refreshes the Google Sheet with all lead data
-router.post("/admin/sheets/sync", authMiddleware, async (_req, res) => {
-  const connectors = new ReplitConnectors();
-
+// Internal helper — syncs the Leads tab into the shared workbook
+async function syncLeadsTab(connectors: ReplitConnectors): Promise<{ rowCount: number }> {
   const allLeads = await db.select().from(leadsTable);
 
   const headers = [
@@ -203,92 +200,117 @@ router.post("/admin/sheets/sync", authMiddleware, async (_req, res) => {
     new Date(l.createdAt).toLocaleDateString("en-US"),
   ]);
 
-  try {
-    // Create a new spreadsheet if we don't have one yet
-    if (!cachedSpreadsheetId) {
-      const createRes = await connectors.proxy("google-sheet", "/v4/spreadsheets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          properties: { title: "Nexpoint Leads — Live Data" },
-          sheets: [{
-            properties: { title: "Leads" },
-          }],
-        }),
-      });
-      const sheet = await createRes.json() as any;
-      cachedSpreadsheetId = sheet.spreadsheetId;
-    }
+  // Ensure "Leads" tab exists in the shared workbook
+  const sheetListRes = await connectors.proxy(
+    "google-sheet",
+    `/v4/spreadsheets/${WORKFLOW_SHEET_ID}?fields=sheets.properties`,
+  );
+  const sheetList = await sheetListRes.json() as any;
+  const existing = sheetList.sheets?.find((s: any) => s.properties?.title === LEADS_TAB_NAME);
+  let tabSheetId: number;
 
-    const spreadsheetId = cachedSpreadsheetId!;
-
-    // Clear the sheet first
-    await connectors.proxy("google-sheet", `/v4/spreadsheets/${spreadsheetId}/values/Leads:clear`, {
+  if (!existing) {
+    const addRes = await connectors.proxy("google-sheet", `/v4/spreadsheets/${WORKFLOW_SHEET_ID}:batchUpdate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: LEADS_TAB_NAME } } }] }),
     });
+    const addData = await addRes.json() as any;
+    tabSheetId = addData.replies?.[0]?.addSheet?.properties?.sheetId ?? 0;
+  } else {
+    tabSheetId = existing.properties.sheetId;
+  }
 
-    // Write headers + all rows
-    const values = [headers, ...rows];
-    await connectors.proxy("google-sheet", `/v4/spreadsheets/${spreadsheetId}/values/Leads!A1:append?valueInputOption=RAW&insertDataOption=OVERWRITE`, {
+  // Clear then write
+  await connectors.proxy("google-sheet", `/v4/spreadsheets/${WORKFLOW_SHEET_ID}/values/${encodeURIComponent(LEADS_TAB_NAME)}:clear`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  await connectors.proxy(
+    "google-sheet",
+    `/v4/spreadsheets/${WORKFLOW_SHEET_ID}/values/${encodeURIComponent(LEADS_TAB_NAME)}!A1:append?valueInputOption=RAW&insertDataOption=OVERWRITE`,
+    {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ values }),
-    });
+      body: JSON.stringify({ values: [headers, ...rows] }),
+    },
+  );
 
-    // Bold the header row and set column widths
-    await connectors.proxy("google-sheet", `/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        requests: [
-          {
-            repeatCell: {
-              range: { sheetId: 0, startRowIndex: 0, endRowIndex: 1 },
-              cell: {
-                userEnteredFormat: {
-                  textFormat: { bold: true },
-                  backgroundColor: { red: 0.13, green: 0.17, blue: 0.29 },
-                  horizontalAlignment: "CENTER",
-                },
+  // Format header row — light indigo to match Workflow Health tab
+  await connectors.proxy("google-sheet", `/v4/spreadsheets/${WORKFLOW_SHEET_ID}:batchUpdate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      requests: [
+        {
+          repeatCell: {
+            range: { sheetId: tabSheetId, startRowIndex: 0, endRowIndex: 1 },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true, foregroundColor: { red: 0.18, green: 0.13, blue: 0.42 } },
+                backgroundColor: { red: 0.84, green: 0.82, blue: 0.97 },
+                horizontalAlignment: "CENTER",
               },
-              fields: "userEnteredFormat(textFormat,backgroundColor,horizontalAlignment)",
             },
+            fields: "userEnteredFormat(textFormat,backgroundColor,horizontalAlignment)",
           },
-          {
-            autoResizeDimensions: {
-              dimensions: { sheetId: 0, dimension: "COLUMNS", startIndex: 0, endIndex: headers.length },
-            },
+        },
+        {
+          autoResizeDimensions: {
+            dimensions: { sheetId: tabSheetId, dimension: "COLUMNS", startIndex: 0, endIndex: headers.length },
           },
-          {
-            updateSheetProperties: {
-              properties: { sheetId: 0, gridProperties: { frozenRowCount: 1 } },
-              fields: "gridProperties.frozenRowCount",
-            },
+        },
+        {
+          updateSheetProperties: {
+            properties: { sheetId: tabSheetId, gridProperties: { frozenRowCount: 1 } },
+            fields: "gridProperties.frozenRowCount",
           },
-        ],
-      }),
-    });
+        },
+      ],
+    }),
+  });
 
-    const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
-    res.json({ success: true, spreadsheetId, url: sheetUrl, rowCount: rows.length });
+  return { rowCount: rows.length };
+}
+
+// POST /admin/sheets/sync — syncs the Leads tab into the shared workbook
+router.post("/admin/sheets/sync", authMiddleware, async (_req, res) => {
+  try {
+    const connectors = new ReplitConnectors();
+    const { rowCount } = await syncLeadsTab(connectors);
+    res.json({ success: true, url: WORKBOOK_URL, rowCount });
   } catch (err: any) {
-    res.status(500).json({ error: err?.message ?? "Sheets sync failed" });
+    res.status(500).json({ error: err?.message ?? "Leads sync failed" });
   }
 });
 
-// GET /admin/sheets/info — returns the current sheet URL if it exists
+// GET /admin/sheets/info — always returns the shared workbook URL
 router.get("/admin/sheets/info", authMiddleware, async (_req, res) => {
-  if (!cachedSpreadsheetId) {
-    res.json({ exists: false });
-    return;
+  res.json({ exists: true, url: WORKBOOK_URL, spreadsheetId: WORKFLOW_SHEET_ID });
+});
+
+// POST /admin/sheets/sync-all — syncs both the Leads tab and the Workflow Health tab
+router.post("/admin/sheets/sync-all", authMiddleware, async (_req, res) => {
+  try {
+    const connectors = new ReplitConnectors();
+    const [leadsResult, wfResult] = await Promise.allSettled([
+      syncLeadsTab(connectors),
+      syncWorkflowHealthTab(connectors),
+    ]);
+    const leadsOk  = leadsResult.status  === "fulfilled";
+    const wfOk     = wfResult.status     === "fulfilled";
+    const rowCount = leadsOk ? leadsResult.value.rowCount : 0;
+    res.json({
+      success: leadsOk && wfOk,
+      url: WORKBOOK_URL,
+      rowCount,
+      leadsError:  !leadsOk  ? (leadsResult.reason?.message ?? "Leads sync failed")  : undefined,
+      wfError:     !wfOk     ? (wfResult.reason?.message   ?? "Workflow sync failed") : undefined,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Sync-all failed" });
   }
-  res.json({
-    exists: true,
-    url: `https://docs.google.com/spreadsheets/d/${cachedSpreadsheetId}`,
-    spreadsheetId: cachedSpreadsheetId,
-  });
 });
 
 // ─── Workflow Health ───────────────────────────────────────────────────────
@@ -372,183 +394,170 @@ router.get("/admin/workflow-health", authMiddleware, async (_req, res) => {
   }
 });
 
-// POST /admin/sheets/workflow-health-sync — writes Workflow Health tab to the user's workbook
-router.post("/admin/sheets/workflow-health-sync", authMiddleware, async (_req, res) => {
-  try {
-    const connectors = new ReplitConnectors();
-    const now = new Date();
+// Internal helper — syncs the Workflow Health tab into the shared workbook
+async function syncWorkflowHealthTab(connectors: ReplitConnectors): Promise<{ summary: any; syncedAt: string }> {
+  const now = new Date();
 
-    const actions = await db
-      .select({
-        id: leadActionsTable.id, leadId: leadActionsTable.leadId,
-        actionType: leadActionsTable.actionType, segment: leadActionsTable.segment,
-        status: leadActionsTable.status, scheduledAt: leadActionsTable.scheduledAt,
-        executedAt: leadActionsTable.executedAt, createdAt: leadActionsTable.createdAt,
-        leadName: leadsTable.fullName, email: leadsTable.email,
-        companyName: leadsTable.companyName, jobTitle: leadsTable.jobTitle,
-      })
-      .from(leadActionsTable)
-      .leftJoin(leadsTable, eq(leadActionsTable.leadId, leadsTable.id));
+  const actions = await db
+    .select({
+      id: leadActionsTable.id, leadId: leadActionsTable.leadId,
+      actionType: leadActionsTable.actionType, segment: leadActionsTable.segment,
+      status: leadActionsTable.status, scheduledAt: leadActionsTable.scheduledAt,
+      executedAt: leadActionsTable.executedAt, createdAt: leadActionsTable.createdAt,
+      leadName: leadsTable.fullName, email: leadsTable.email,
+      companyName: leadsTable.companyName, jobTitle: leadsTable.jobTitle,
+    })
+    .from(leadActionsTable)
+    .leftJoin(leadsTable, eq(leadActionsTable.leadId, leadsTable.id));
 
-    const health = buildWorkflowHealth(actions, now);
-    const { summary, byType, pendingActions } = health;
+  const health = buildWorkflowHealth(actions, now);
+  const { summary, byType, pendingActions } = health;
 
-    // Ensure "Workflow Health" tab exists — add if missing
-    const sheetListRes = await connectors.proxy(
-      "google-sheet",
-      `/v4/spreadsheets/${WORKFLOW_SHEET_ID}?fields=sheets.properties`,
-    );
-    const sheetList = await sheetListRes.json() as any;
-    const existingSheet = sheetList.sheets?.find((s: any) => s.properties?.title === WORKFLOW_TAB_NAME);
-    let tabSheetId: number;
+  // Ensure "Workflow Health" tab exists — add if missing
+  const sheetListRes = await connectors.proxy(
+    "google-sheet",
+    `/v4/spreadsheets/${WORKFLOW_SHEET_ID}?fields=sheets.properties`,
+  );
+  const sheetList = await sheetListRes.json() as any;
+  const existingSheet = sheetList.sheets?.find((s: any) => s.properties?.title === WORKFLOW_TAB_NAME);
+  let tabSheetId: number;
 
-    if (!existingSheet) {
-      const addRes = await connectors.proxy("google-sheet", `/v4/spreadsheets/${WORKFLOW_SHEET_ID}:batchUpdate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requests: [{ addSheet: { properties: { title: WORKFLOW_TAB_NAME } } }] }),
-      });
-      const addData = await addRes.json() as any;
-      tabSheetId = addData.replies?.[0]?.addSheet?.properties?.sheetId ?? 1;
-    } else {
-      tabSheetId = existingSheet.properties.sheetId;
-    }
-
-    // Clear the tab
-    await connectors.proxy("google-sheet", `/v4/spreadsheets/${WORKFLOW_SHEET_ID}/values/${encodeURIComponent(WORKFLOW_TAB_NAME)}:clear`, {
+  if (!existingSheet) {
+    const addRes = await connectors.proxy("google-sheet", `/v4/spreadsheets/${WORKFLOW_SHEET_ID}:batchUpdate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: WORKFLOW_TAB_NAME } } }] }),
     });
+    const addData = await addRes.json() as any;
+    tabSheetId = addData.replies?.[0]?.addSheet?.properties?.sheetId ?? 1;
+  } else {
+    tabSheetId = existingSheet.properties.sheetId;
+  }
 
-    function fmtAge(mins: number) {
-      if (mins < 60) return `${mins}m`;
-      if (mins < 1440) return `${Math.round(mins / 60)}h`;
-      return `${Math.round(mins / 1440)}d`;
-    }
+  // Clear the tab
+  await connectors.proxy("google-sheet", `/v4/spreadsheets/${WORKFLOW_SHEET_ID}/values/${encodeURIComponent(WORKFLOW_TAB_NAME)}:clear`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
 
-    // Build sheet data
-    const rows: string[][] = [
-      // Title
-      ["NEXPOINT — WORKFLOW HEALTH MONITOR"],
-      [`Last synced: ${now.toLocaleString("en-US")}`, "", "", "", "", "", ""],
-      [""],
-      // Summary section
-      ["📊 SUMMARY", ""],
-      ["Metric", "Value"],
-      ["Total Actions", String(summary.total)],
-      ["Delivered / Success", String(summary.delivered)],
-      ["Pending", String(summary.pending)],
-      ["Scheduled (future)", String(summary.scheduled)],
-      ["Failed", String(summary.failed)],
-      ["Overdue (past SLA)", String(summary.overdue)],
-      ["Workflow Health Score", `${summary.healthScore}%`],
-      [""],
-      // Action type breakdown
-      ["📋 ACTION TYPE BREAKDOWN", ""],
-      ["Action Type", "Total", "Delivered", "Pending", "Scheduled", "Failed", "Overdue"],
-      ...byType.map((t: any) => [
-        t.label, String(t.total), String(t.delivered),
-        String(t.pending), String(t.scheduled), String(t.failed), String(t.overdue),
-      ]),
-      [""],
-      // Pending / overdue table
-      [`⚠️ PENDING & OVERDUE ACTIONS (${pendingActions.length})`, ""],
-      ["Lead Name", "Company", "Role", "Segment", "Action", "Status", "Age", "SLA", "Overdue?", "Overdue By", "Created At", "Email"],
-      ...pendingActions.map((a: any) => [
-        a.leadName ?? "—", a.companyName ?? "—", a.jobTitle ?? "—",
-        a.segment, a.label, a.status.toUpperCase(),
-        fmtAge(a.ageMins),
-        a.slaMins ? fmtAge(a.slaMins) : "N/A",
-        a.overdue ? "YES" : "No",
-        a.overdue ? fmtAge(a.overdueByMins) : "—",
-        new Date(a.createdAt).toLocaleString("en-US"),
-        a.email ?? "—",
-      ]),
-    ];
+  function fmtAge(mins: number) {
+    if (mins < 60) return `${mins}m`;
+    if (mins < 1440) return `${Math.round(mins / 60)}h`;
+    return `${Math.round(mins / 1440)}d`;
+  }
 
-    await connectors.proxy(
-      "google-sheet",
-      `/v4/spreadsheets/${WORKFLOW_SHEET_ID}/values/${encodeURIComponent(WORKFLOW_TAB_NAME)}!A1:append?valueInputOption=RAW&insertDataOption=OVERWRITE`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ values: rows }),
-      }
-    );
+  // Build sheet data
+  const rows: string[][] = [
+    ["NEXPOINT — WORKFLOW HEALTH MONITOR"],
+    [`Last synced: ${now.toLocaleString("en-US")}`, "", "", "", "", "", ""],
+    [""],
+    ["📊 SUMMARY", ""],
+    ["Metric", "Value"],
+    ["Total Actions", String(summary.total)],
+    ["Delivered / Success", String(summary.delivered)],
+    ["Pending", String(summary.pending)],
+    ["Scheduled (future)", String(summary.scheduled)],
+    ["Failed", String(summary.failed)],
+    ["Overdue (past SLA)", String(summary.overdue)],
+    ["Workflow Health Score", `${summary.healthScore}%`],
+    [""],
+    ["📋 ACTION TYPE BREAKDOWN", ""],
+    ["Action Type", "Total", "Delivered", "Pending", "Scheduled", "Failed", "Overdue"],
+    ...byType.map((t: any) => [
+      t.label, String(t.total), String(t.delivered),
+      String(t.pending), String(t.scheduled), String(t.failed), String(t.overdue),
+    ]),
+    [""],
+    [`⚠️ PENDING & OVERDUE ACTIONS (${pendingActions.length})`, ""],
+    ["Lead Name", "Company", "Role", "Segment", "Action", "Status", "Age", "SLA", "Overdue?", "Overdue By", "Created At", "Email"],
+    ...pendingActions.map((a: any) => [
+      a.leadName ?? "—", a.companyName ?? "—", a.jobTitle ?? "—",
+      a.segment, a.label, a.status.toUpperCase(),
+      fmtAge(a.ageMins),
+      a.slaMins ? fmtAge(a.slaMins) : "N/A",
+      a.overdue ? "YES" : "No",
+      a.overdue ? fmtAge(a.overdueByMins) : "—",
+      new Date(a.createdAt).toLocaleString("en-US"),
+      a.email ?? "—",
+    ]),
+  ];
 
-    // Format: bold headers, freeze row 1, colour overdue rows red
-    const dataStartRow = rows.findIndex(r => r[0] === "Lead Name");
-    const overdueRows = pendingActions
-      .map((a: any, i: number) => ({ idx: dataStartRow + 1 + i, overdue: a.overdue }))
-      .filter((r: any) => r.overdue);
+  await connectors.proxy(
+    "google-sheet",
+    `/v4/spreadsheets/${WORKFLOW_SHEET_ID}/values/${encodeURIComponent(WORKFLOW_TAB_NAME)}!A1:append?valueInputOption=RAW&insertDataOption=OVERWRITE`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ values: rows }) },
+  );
 
-    const formatRequests: any[] = [
-      // Bold row 1 (title) — soft indigo with dark purple text
-      {
-        repeatCell: {
-          range: { sheetId: tabSheetId, startRowIndex: 0, endRowIndex: 1 },
-          cell: {
-            userEnteredFormat: {
-              textFormat: { bold: true, fontSize: 13, foregroundColor: { red: 0.18, green: 0.13, blue: 0.42 } },
-              backgroundColor: { red: 0.84, green: 0.82, blue: 0.97 },
-            },
+  const dataStartRow = rows.findIndex(r => r[0] === "Lead Name");
+  const overdueRows = pendingActions
+    .map((a: any, i: number) => ({ idx: dataStartRow + 1 + i, overdue: a.overdue }))
+    .filter((r: any) => r.overdue);
+
+  const formatRequests: any[] = [
+    {
+      repeatCell: {
+        range: { sheetId: tabSheetId, startRowIndex: 0, endRowIndex: 1 },
+        cell: {
+          userEnteredFormat: {
+            textFormat: { bold: true, fontSize: 13, foregroundColor: { red: 0.18, green: 0.13, blue: 0.42 } },
+            backgroundColor: { red: 0.84, green: 0.82, blue: 0.97 },
           },
-          fields: "userEnteredFormat(textFormat,backgroundColor)",
         },
+        fields: "userEnteredFormat(textFormat,backgroundColor)",
       },
-      // Freeze top 2 rows
-      { updateSheetProperties: { properties: { sheetId: tabSheetId, gridProperties: { frozenRowCount: 2 } }, fields: "gridProperties.frozenRowCount" } },
-      // Auto-resize all columns
-      { autoResizeDimensions: { dimensions: { sheetId: tabSheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 12 } } },
-    ];
+    },
+    { updateSheetProperties: { properties: { sheetId: tabSheetId, gridProperties: { frozenRowCount: 2 } }, fields: "gridProperties.frozenRowCount" } },
+    { autoResizeDimensions: { dimensions: { sheetId: tabSheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 12 } } },
+  ];
 
-    // Section header rows (rows with "📊", "📋", "⚠️") — very light lavender with muted purple text
-    rows.forEach((row, idx) => {
-      if (row[0]?.match(/^[📊📋⚠️]/u)) {
-        formatRequests.push({
-          repeatCell: {
-            range: { sheetId: tabSheetId, startRowIndex: idx, endRowIndex: idx + 1 },
-            cell: {
-              userEnteredFormat: {
-                textFormat: { bold: true, foregroundColor: { red: 0.30, green: 0.25, blue: 0.58 } },
-                backgroundColor: { red: 0.92, green: 0.91, blue: 0.99 },
-              },
-            },
-            fields: "userEnteredFormat(textFormat,backgroundColor)",
-          },
-        });
-      }
-    });
-
-    // Light coral background + dark red text for overdue action rows
-    for (const { idx } of overdueRows) {
+  rows.forEach((row, idx) => {
+    if (row[0]?.match(/^[📊📋⚠️]/u)) {
       formatRequests.push({
         repeatCell: {
           range: { sheetId: tabSheetId, startRowIndex: idx, endRowIndex: idx + 1 },
           cell: {
             userEnteredFormat: {
-              backgroundColor: { red: 1.0, green: 0.88, blue: 0.88 },
-              textFormat: { foregroundColor: { red: 0.65, green: 0.12, blue: 0.12 }, bold: true },
+              textFormat: { bold: true, foregroundColor: { red: 0.30, green: 0.25, blue: 0.58 } },
+              backgroundColor: { red: 0.92, green: 0.91, blue: 0.99 },
             },
           },
-          fields: "userEnteredFormat(backgroundColor,textFormat)",
+          fields: "userEnteredFormat(textFormat,backgroundColor)",
         },
       });
     }
+  });
 
-    await connectors.proxy("google-sheet", `/v4/spreadsheets/${WORKFLOW_SHEET_ID}:batchUpdate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requests: formatRequests }),
+  for (const { idx } of overdueRows) {
+    formatRequests.push({
+      repeatCell: {
+        range: { sheetId: tabSheetId, startRowIndex: idx, endRowIndex: idx + 1 },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: { red: 1.0, green: 0.88, blue: 0.88 },
+            textFormat: { foregroundColor: { red: 0.65, green: 0.12, blue: 0.12 }, bold: true },
+          },
+        },
+        fields: "userEnteredFormat(backgroundColor,textFormat)",
+      },
     });
+  }
 
-    res.json({
-      success: true,
-      url: `https://docs.google.com/spreadsheets/d/${WORKFLOW_SHEET_ID}`,
-      summary,
-      syncedAt: now.toISOString(),
-    });
+  await connectors.proxy("google-sheet", `/v4/spreadsheets/${WORKFLOW_SHEET_ID}:batchUpdate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ requests: formatRequests }),
+  });
+
+  return { summary, syncedAt: now.toISOString() };
+}
+
+// POST /admin/sheets/workflow-health-sync — writes Workflow Health tab to the shared workbook
+router.post("/admin/sheets/workflow-health-sync", authMiddleware, async (_req, res) => {
+  try {
+    const connectors = new ReplitConnectors();
+    const { summary, syncedAt } = await syncWorkflowHealthTab(connectors);
+    res.json({ success: true, url: WORKBOOK_URL, summary, syncedAt });
   } catch (err: any) {
     res.status(500).json({ error: err?.message ?? "Workflow health sync failed" });
   }

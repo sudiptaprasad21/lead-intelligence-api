@@ -206,7 +206,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [stats, setStats] = useState<Stats | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
-  const [sheetUrl, setSheetUrl] = useState<string | null>(null);
+  const WORKBOOK_URL = "https://docs.google.com/spreadsheets/d/1mE5u20YienuuUYiihyLIrKiQT0oTtt0TwJCpX3YGLe0";
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [expandedLeadId, setExpandedLeadId] = useState<number | null>(null);
@@ -252,21 +252,31 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
 
   async function handleSyncWorkflowHealth() {
     setWfSyncing(true);
+    setSyncing(true);
     setWfSyncMsg("");
+    setSyncMsg("");
     try {
-      const res = await adminFetch("/admin/sheets/workflow-health-sync", { method: "POST" });
+      const res = await adminFetch("/admin/sheets/sync-all", { method: "POST" });
       const data = await res.json() as any;
       if (res.ok) {
-        setWfSyncMsg("Synced to Google Sheets");
+        const msg = data.rowCount != null
+          ? `Synced ${data.rowCount} lead${data.rowCount !== 1 ? "s" : ""} + Workflow Health`
+          : "Synced both sheets";
+        setWfSyncMsg(msg);
+        setSyncMsg(msg);
         await loadWorkflowHealth();
       } else {
-        setWfSyncMsg(data.error ?? "Sync failed");
+        const err = data.error ?? data.wfError ?? data.leadsError ?? "Sync failed";
+        setWfSyncMsg(err);
+        setSyncMsg(err);
       }
     } catch {
       setWfSyncMsg("Network error — sync failed");
+      setSyncMsg("Network error — sync failed");
     } finally {
       setWfSyncing(false);
-      setTimeout(() => setWfSyncMsg(""), 6000);
+      setSyncing(false);
+      setTimeout(() => { setWfSyncMsg(""); setSyncMsg(""); }, 6000);
     }
   }
 
@@ -274,29 +284,35 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     loadStats();
     loadWorkflowHealth();
     loadInsights("weekly");
-    adminFetch("/admin/sheets/info")
-      .then(r => r.json())
-      .then((d: any) => { if (d.exists) setSheetUrl(d.url); })
-      .catch(() => {});
   }, []);
 
   async function handleSyncSheets() {
+    setWfSyncing(true);
     setSyncing(true);
+    setWfSyncMsg("");
     setSyncMsg("");
     try {
-      const res = await adminFetch("/admin/sheets/sync", { method: "POST" });
+      const res = await adminFetch("/admin/sheets/sync-all", { method: "POST" });
       const data = await res.json() as any;
       if (res.ok) {
-        setSheetUrl(data.url);
-        setSyncMsg(`Synced ${data.rowCount} lead${data.rowCount !== 1 ? "s" : ""} to Google Sheets`);
+        const msg = data.rowCount != null
+          ? `Synced ${data.rowCount} lead${data.rowCount !== 1 ? "s" : ""} + Workflow Health`
+          : "Synced both sheets";
+        setSyncMsg(msg);
+        setWfSyncMsg(msg);
+        await loadWorkflowHealth();
       } else {
-        setSyncMsg(data.error ?? "Sync failed");
+        const err = data.error ?? data.leadsError ?? data.wfError ?? "Sync failed";
+        setSyncMsg(err);
+        setWfSyncMsg(err);
       }
     } catch {
       setSyncMsg("Network error — sync failed");
+      setWfSyncMsg("Network error — sync failed");
     } finally {
       setSyncing(false);
-      setTimeout(() => setSyncMsg(""), 6000);
+      setWfSyncing(false);
+      setTimeout(() => { setSyncMsg(""); setWfSyncMsg(""); }, 6000);
     }
   }
 
@@ -543,18 +559,16 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground hidden sm:block">Signed in as <strong>{username}</strong></span>
-            {sheetUrl && (
-              <a
-                href={sheetUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-500/15 text-green-400 border border-green-500/25 hover:bg-green-500/25 transition-colors"
-              >
-                <Sheet className="w-3.5 h-3.5" />
-                Open Sheet
-                <ExternalLink className="w-3 h-3 opacity-60" />
-              </a>
-            )}
+            <a
+              href={WORKBOOK_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-500/15 text-green-400 border border-green-500/25 hover:bg-green-500/25 transition-colors"
+            >
+              <Sheet className="w-3.5 h-3.5" />
+              Open Workbook
+              <ExternalLink className="w-3 h-3 opacity-60" />
+            </a>
             <Button
               variant="outline"
               size="sm"
