@@ -515,20 +515,27 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
 
   const since = presetToSince(datePreset);
 
+  // 1. Date-only slice
   const dateFilteredLeads = since ? leads.filter(l => new Date(l.created_at) >= since) : leads;
 
-  const filtered = dateFilteredLeads.filter(l => {
-    const matchSearch = search === "" ||
-      l.full_name.toLowerCase().includes(search.toLowerCase()) ||
-      l.email.toLowerCase().includes(search.toLowerCase()) ||
-      l.company_name.toLowerCase().includes(search.toLowerCase());
-    const matchSeg = segFilter === "all" || l.segment === segFilter;
-    return matchSearch && matchSeg;
-  });
+  // 2. Date + segment slice — drives all KPI cards, charts, and stats
+  const segAndDateFiltered = segFilter === "all"
+    ? dateFilteredLeads
+    : dateFilteredLeads.filter(l => l.segment === segFilter);
 
-  const displayStats: Stats | null = datePreset === "all"
+  // 3. Full filter (date + segment + search) — drives the lead table only
+  const filtered = segAndDateFiltered.filter(l =>
+    search === "" ||
+    l.full_name.toLowerCase().includes(search.toLowerCase()) ||
+    l.email.toLowerCase().includes(search.toLowerCase()) ||
+    l.company_name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  // Use server stats only when no filters are active; otherwise recompute client-side
+  const noFilters = datePreset === "all" && segFilter === "all";
+  const displayStats: Stats | null = noFilters
     ? stats
-    : leads.length > 0 ? computeStatsFromLeads(dateFilteredLeads) : null;
+    : computeStatsFromLeads(segAndDateFiltered);
 
   const segmentData = displayStats
     ? Object.entries(displayStats.segment_counts).map(([name, value]) => ({ name, value }))
