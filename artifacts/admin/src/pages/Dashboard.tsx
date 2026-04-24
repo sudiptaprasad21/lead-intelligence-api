@@ -98,20 +98,20 @@ function presetToSince(preset: DatePreset): Date | null {
 function computeStatsFromLeads(rawLeads: any[]): Stats {
   const total = rawLeads.length;
   const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
-  const recent_7d = rawLeads.filter(l => new Date(l.created_at) >= sevenDaysAgo).length;
-  const avg_total_score   = total > 0 ? Math.round(rawLeads.reduce((s, l) => s + (l.total_score ?? 0), 0) / total) : 0;
-  const avg_intent_score  = total > 0 ? Math.round(rawLeads.reduce((s, l) => s + (l.intent_score ?? 0), 0) / total) : 0;
-  const avg_fit_score     = total > 0 ? Math.round(rawLeads.reduce((s, l) => s + (l.fit_score ?? 0), 0) / total) : 0;
+  const recent_7d = rawLeads.filter(l => new Date(l.createdAt) >= sevenDaysAgo).length;
+  const avg_total_score   = total > 0 ? Math.round(rawLeads.reduce((s, l) => s + (l.totalScore ?? 0), 0) / total) : 0;
+  const avg_intent_score  = total > 0 ? Math.round(rawLeads.reduce((s, l) => s + (l.intentScore ?? 0), 0) / total) : 0;
+  const avg_fit_score     = total > 0 ? Math.round(rawLeads.reduce((s, l) => s + (l.fitScore ?? 0), 0) / total) : 0;
   const segment_counts    = rawLeads.reduce<Record<string, number>>((acc, l) => { acc[l.segment] = (acc[l.segment] ?? 0) + 1; return acc; }, {});
   const industry_counts   = rawLeads.reduce<Record<string, number>>((acc, l) => { const k = l.industry ?? "Unknown"; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {});
-  const source_counts     = rawLeads.reduce<Record<string, number>>((acc, l) => { const k = l.referral_source ?? l.lead_source ?? "Direct"; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {});
-  const form_type_counts  = rawLeads.reduce<Record<string, number>>((acc, l) => { const k = l.form_type ?? "Unknown"; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {});
+  const source_counts     = rawLeads.reduce<Record<string, number>>((acc, l) => { const k = l.referralSource ?? l.leadSource ?? "Direct"; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {});
+  const form_type_counts  = rawLeads.reduce<Record<string, number>>((acc, l) => { const k = l.formType ?? "Unknown"; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {});
   const score_distribution = [
-    { range: "0–20",   count: rawLeads.filter(l => (l.total_score ?? 0) <= 20).length },
-    { range: "21–40",  count: rawLeads.filter(l => (l.total_score ?? 0) > 20 && (l.total_score ?? 0) <= 40).length },
-    { range: "41–60",  count: rawLeads.filter(l => (l.total_score ?? 0) > 40 && (l.total_score ?? 0) <= 60).length },
-    { range: "61–80",  count: rawLeads.filter(l => (l.total_score ?? 0) > 60 && (l.total_score ?? 0) <= 80).length },
-    { range: "81–100", count: rawLeads.filter(l => (l.total_score ?? 0) > 80).length },
+    { range: "0–20",   count: rawLeads.filter(l => (l.totalScore ?? 0) <= 20).length },
+    { range: "21–40",  count: rawLeads.filter(l => (l.totalScore ?? 0) > 20 && (l.totalScore ?? 0) <= 40).length },
+    { range: "41–60",  count: rawLeads.filter(l => (l.totalScore ?? 0) > 40 && (l.totalScore ?? 0) <= 60).length },
+    { range: "61–80",  count: rawLeads.filter(l => (l.totalScore ?? 0) > 60 && (l.totalScore ?? 0) <= 80).length },
+    { range: "81–100", count: rawLeads.filter(l => (l.totalScore ?? 0) > 80).length },
   ];
   return { total, recent_7d, avg_total_score, avg_intent_score, avg_fit_score, segment_counts, industry_counts, source_counts, form_type_counts, score_distribution };
 }
@@ -516,7 +516,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const since = presetToSince(datePreset);
 
   // 1. Date-only slice
-  const dateFilteredLeads = since ? leads.filter(l => new Date(l.created_at) >= since) : leads;
+  const dateFilteredLeads = since ? leads.filter(l => new Date(l.createdAt) >= since) : leads;
 
   // 2. Date + segment slice — drives all KPI cards, charts, and stats
   const segAndDateFiltered = segFilter === "all"
@@ -526,9 +526,9 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   // 3. Full filter (date + segment + search) — drives the lead table only
   const filtered = segAndDateFiltered.filter(l =>
     search === "" ||
-    l.full_name.toLowerCase().includes(search.toLowerCase()) ||
+    l.fullName.toLowerCase().includes(search.toLowerCase()) ||
     l.email.toLowerCase().includes(search.toLowerCase()) ||
-    l.company_name.toLowerCase().includes(search.toLowerCase())
+    l.companyName.toLowerCase().includes(search.toLowerCase())
   );
 
   // Use server stats only when no filters are active; otherwise recompute client-side
@@ -1231,37 +1231,37 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">{i + 1}</td>
                           <td className="px-4 py-3">
-                            <div className="font-medium text-foreground whitespace-nowrap">{lead.full_name}</div>
+                            <div className="font-medium text-foreground whitespace-nowrap">{lead.fullName}</div>
                             <div className="text-muted-foreground text-[10px]">{lead.email}</div>
                           </td>
-                          <td className="px-4 py-3 whitespace-nowrap font-medium">{lead.company_name}</td>
-                          <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">{lead.job_title ?? <span className="italic opacity-50">—</span>}</td>
+                          <td className="px-4 py-3 whitespace-nowrap font-medium">{lead.companyName}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">{lead.jobTitle ?? <span className="italic opacity-50">—</span>}</td>
                           <td className="px-4 py-3 whitespace-nowrap">{lead.industry ?? <span className="italic text-muted-foreground/50">—</span>}</td>
-                          <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">{lead.company_size ?? "—"}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">{lead.companySize ?? "—"}</td>
                           <td className="px-4 py-3">
                             <span className="px-2 py-0.5 bg-primary/15 text-primary rounded text-[10px] font-medium whitespace-nowrap">
-                              {ctaLabel(lead.form_type, lead.campaign)}
+                              {ctaLabel(lead.formType, lead.campaign)}
                             </span>
                           </td>
                           <td className="px-4 py-3"><SegmentBadge segment={lead.segment} /></td>
                           <td className="px-4 py-3">
-                            <span className="font-bold text-sm text-foreground">{lead.total_score}</span>
+                            <span className="font-bold text-sm text-foreground">{lead.totalScore}</span>
                             <span className="text-muted-foreground text-[10px]">/100</span>
                           </td>
                           <td className="px-4 py-3 min-w-[80px]">
-                            <ScoreBar value={lead.intent_score} max={40} color="#3b82f6" />
+                            <ScoreBar value={lead.intentScore} max={40} color="#3b82f6" />
                           </td>
                           <td className="px-4 py-3 min-w-[80px]">
-                            <ScoreBar value={lead.fit_score} max={30} color="#06b6d4" />
+                            <ScoreBar value={lead.fitScore} max={30} color="#06b6d4" />
                           </td>
                           <td className="px-4 py-3 min-w-[80px]">
-                            <ScoreBar value={lead.behavior_score} max={20} color="#22c55e" />
+                            <ScoreBar value={lead.behaviorScore} max={20} color="#22c55e" />
                           </td>
                           <td className="px-4 py-3 min-w-[80px]">
-                            <ScoreBar value={lead.source_score} max={10} color="#f59e0b" />
+                            <ScoreBar value={lead.sourceScore} max={10} color="#f59e0b" />
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
-                            {new Date(lead.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            {new Date(lead.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                           </td>
                         </tr>
 
@@ -1274,7 +1274,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
                                     <Layers className="w-3.5 h-3.5 text-primary" />
-                                    Action Log — {lead.full_name}
+                                    Action Log — {lead.fullName}
                                     <SegmentBadge segment={lead.segment} />
                                   </div>
                                   <Button

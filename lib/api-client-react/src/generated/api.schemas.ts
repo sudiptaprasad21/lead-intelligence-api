@@ -87,12 +87,12 @@ export interface UpsertLeadBody {
 export interface Lead {
   id: number;
   email: string;
-  full_name: string;
-  company_name: string;
+  fullName: string;
+  companyName: string;
   /** @nullable */
-  job_title?: string | null;
+  jobTitle?: string | null;
   /** @nullable */
-  company_size?: string | null;
+  companySize?: string | null;
   /** @nullable */
   industry?: string | null;
   /** Always "website_visit" for leads from this landing page */
@@ -101,26 +101,26 @@ export interface Lead {
    * Channel source (direct, referral, event, organic, paid)
    * @nullable
    */
-  lead_source: string | null;
+  leadSource: string | null;
   /** @nullable */
   campaign?: string | null;
   /** @nullable */
-  form_type?: string | null;
+  formType?: string | null;
   /** @nullable */
-  referral_source?: string | null;
+  referralSource?: string | null;
   /** @nullable */
-  marketing_challenge?: string | null;
-  intent_score: number;
-  fit_score: number;
-  behavior_score: number;
-  source_score: number;
-  total_score: number;
+  marketingChallenge?: string | null;
+  intentScore: number;
+  fitScore: number;
+  behaviorScore: number;
+  sourceScore: number;
+  totalScore: number;
   /** hot (SQL), warm (MQL), nurture, or cold */
   segment: string;
   /** @nullable */
-  last_activity_at?: string | null;
-  created_at: string;
-  updated_at: string;
+  lastActivityAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /**
