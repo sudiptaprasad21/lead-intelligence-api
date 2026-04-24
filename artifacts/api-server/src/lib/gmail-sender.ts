@@ -10,14 +10,25 @@ export interface GmailResult {
   error?: string;
 }
 
+/**
+ * Encode a header value using RFC 2047 Base64 encoded-word syntax so that
+ * non-ASCII characters (curly quotes, em-dashes, etc.) are not garbled by
+ * mail clients that interpret raw bytes as Latin-1.
+ */
+function encodeHeaderWord(value: string): string {
+  const encoded = Buffer.from(value, "utf8").toString("base64");
+  return `=?UTF-8?B?${encoded}?=`;
+}
+
 function buildRFC2822(params: { to: string; subject: string; body: string }): string {
   const raw = [
     `To: ${params.to}`,
-    `Subject: ${params.subject}`,
+    `Subject: ${encodeHeaderWord(params.subject)}`,
     `MIME-Version: 1.0`,
     `Content-Type: text/plain; charset=UTF-8`,
+    `Content-Transfer-Encoding: base64`,
     ``,
-    params.body,
+    Buffer.from(params.body, "utf8").toString("base64"),
   ].join("\r\n");
   return Buffer.from(raw).toString("base64url");
 }
