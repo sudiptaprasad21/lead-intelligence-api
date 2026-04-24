@@ -271,6 +271,8 @@ pnpm run dev --filter nexpoint
 - Admin Dashboard: https://nexpoint-marketing-hub.replit.app/admin/
   - Test Username: admin
   - Test Password: 1234
+- API: https://nexpoint-marketing-hub.replit.app/api 
+
 
 #### **Local Development (After Installation)**
 - Landing Page: http://localhost:5173
