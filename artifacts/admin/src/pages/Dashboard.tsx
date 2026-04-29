@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment, useRef, useCallback } from "react";
 import nexPointLogo from "@assets/ChatGPT_Image_Apr_23,_2026,_05_53_31_PM_1776947023096.png";
 import { clearAuth, getUsername, adminFetch, API } from "@/lib/auth";
-import { useListLeads } from "@workspace/api-client-react";
+import { useListLeads, getListLeadsQueryKey } from "@workspace/api-client-react";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend, AreaChart, Area
@@ -228,7 +228,13 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const insightsRef = useRef<HTMLDivElement>(null);
   const dashboardRef = useRef<HTMLDivElement>(null);
 
-  const { data: leads = [], isLoading, refetch, isFetching } = useListLeads();
+  const { data: leads = [], isLoading, refetch, isFetching } = useListLeads({
+    query: {
+      queryKey: getListLeadsQueryKey(),
+      refetchInterval: 30_000,
+      refetchOnWindowFocus: true,
+    },
+  });
 
   async function loadStats() {
     setStatsLoading(true);
@@ -284,6 +290,13 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     loadStats();
     loadWorkflowHealth();
     loadInsights("weekly");
+
+    const poll = setInterval(() => {
+      loadStats();
+      loadWorkflowHealth();
+    }, 30_000);
+
+    return () => clearInterval(poll);
   }, []);
 
   async function handleSyncSheets() {
